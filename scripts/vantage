@@ -1,0 +1,18 @@
+#!/bin/sh /etc/rc.common
+# Example script
+# Copyright (C) 2007 OpenWrt.org
+ 
+START=99
+STOP=10
+ 
+start() {        
+        echo "Starting Vantage Connect"
+        STATIONID=XXX
+        PASSWORD=YYY
+        /usr/bin/vantage_connect -d /dev/ttyUSB0 -s ${STATIONID} -p ${PASSWORD} 2>&1 | logger &
+}                 
+ 
+stop() {          
+        echo "Stopping Vantage Connect"
+        killall vantage_connect
+}

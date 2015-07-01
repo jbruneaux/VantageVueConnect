@@ -1,0 +1,21 @@
+                  $(document.body).append("<div id=\"OutsideTempsGraph\"></div>");
+                  Raphael.fn.drawGraph("OutsideTempsGraph", "Outside Temperature (°C)", "°C", OutsideTempData, 1024, 250, 0, 30);
+                  $(document.body).append("<div id=\"OutsideHumidityGraph\"></div>");
+                  Raphael.fn.drawGraph("OutsideHumidityGraph", "Outside Humidity (%)", "%", OutsideHumidityData, 1024, 250, 0, 100);
+                  $(document.body).append("<div id=\"BarometerGraph\"></div>");
+                  Raphael.fn.drawGraph("BarometerGraph", "Barometer (mbar)", "mbar", BarometerData, 1024, 250);
+                  $(document.body).append("<div id=\"WindSpeedGraph\"></div>");
+                  Raphael.fn.drawGraph("WindSpeedGraph", "Wind Speed (Km/h)", "Km/h", WindSpeedData, 1024, 250, 0);
+                  $(document.body).append("<div id=\"RainRateGraph\"></div>");
+                  Raphael.fn.drawGraph("RainRateGraph", "Rain Rate (mm/h)", "mm/h", RainRateData, 1024, 250);
+                  $(document.body).append("<div id=\"InsideTempsGraph\"></div>");
+                  Raphael.fn.drawGraph("InsideTempsGraph", "Inside Temperature (°C)", "°C", InsideTempData, 1024, 250, 0, 30);
+                  $(document.body).append("<div id=\"InsideHumidityGraph\"></div>");
+                  Raphael.fn.drawGraph("InsideHumidityGraph", "Inside Humidity (%)", "%", InsideHumidityData, 1024, 250, 0, 100);
+              });
+        </script>
+
+    </head>
+    <body>
+    </body>
+</html>

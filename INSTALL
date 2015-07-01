@@ -1,0 +1,31 @@
+/*
+ * VantageVue Connect - A small program to connect a vantage vue console
+ * Copyright (C) 2015  BRUNEAUX Jerome <jbruneaux@laposte.net>
+ *
+ * This file is part of VantageVueConnect.
+ *
+ * VantageVueConnect is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * any later version.
+ *
+ * VantageVueConnect is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with VantageVueConnect.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+From host, within the VantageVueConnect folder :
+* scp vantage_connect root@192.168.xxx.xxx:/overlay/usr/bin
+* ssh root@192.168.xxx.xxx 'mkdir -p /usr/share/vantage_connect/html_template'
+* scp html/weather_chart_* root@192.168.xxx.xxx:/usr/share/vantage_connect/html_template
+* ssh root@192.168.xxx.xxx 'mkdir -p /www/weather'
+* scp html/*.js html/*.css root@192.168.xxx.xxx:/www/weather
+* ssh root@192.168.xxx.xxx 'ln -s /tmp /www/temp'
+* Edit scripts/vantage for station id and password
+* scp scripts/vantage root@192.168.0.21:/etc/init.d/
+* ssh root@192.168.xxx.xxx '/etc/init.d/vantage enable'
+
