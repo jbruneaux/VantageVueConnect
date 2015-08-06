@@ -1,17 +1,19 @@
                   $(document.body).append("<div id=\"OutsideTempsGraph\"></div>");
-                  Raphael.fn.drawGraph("OutsideTempsGraph", "Outside Temperature (°C)", "°C", OutsideTempData, 1024, 250, 0, 30);
+                  Raphael.fn.drawGraph("OutsideTempsGraph", "Outside Temperature (°C)", "°C", ["Average", "Minimum", "Maximum"], OutsideTempData, 1024, 250, 0, 30);
+                  $(document.body).append("<div id=\"OutsideChillGraph\"></div>");
+                  Raphael.fn.drawGraph("OutsideChillGraph", "Outside Chill (°C)", "°C", ["Average", "Minimum", "Maximum"], OutsideChillData, 1024, 250, 0, 30);
                   $(document.body).append("<div id=\"OutsideHumidityGraph\"></div>");
-                  Raphael.fn.drawGraph("OutsideHumidityGraph", "Outside Humidity (%)", "%", OutsideHumidityData, 1024, 250, 0, 100);
+                  Raphael.fn.drawGraph("OutsideHumidityGraph", "Outside Humidity (%)", "%", ["Average", "Minimum", "Maximum"], OutsideHumidityData, 1024, 250, 0, 100);
                   $(document.body).append("<div id=\"BarometerGraph\"></div>");
-                  Raphael.fn.drawGraph("BarometerGraph", "Barometer (mbar)", "mbar", BarometerData, 1024, 250);
+                  Raphael.fn.drawGraph("BarometerGraph", "Barometer (mbar)", "mbar", ["Average", "Minimum", "Maximum"], BarometerData, 1024, 250);
                   $(document.body).append("<div id=\"WindSpeedGraph\"></div>");
-                  Raphael.fn.drawGraph("WindSpeedGraph", "Wind Speed (Km/h)", "Km/h", WindSpeedData, 1024, 250, 0);
+                  Raphael.fn.drawGraph("WindSpeedGraph", "Wind Speed (Km/h)", "Km/h", ["Average", "Minimum", "Maximum"], WindSpeedData, 1024, 250, 0);
                   $(document.body).append("<div id=\"RainRateGraph\"></div>");
-                  Raphael.fn.drawGraph("RainRateGraph", "Rain Rate (mm/h)", "mm/h", RainRateData, 1024, 250);
+                  Raphael.fn.drawGraph("RainRateGraph", "Rain Rate (mm/h)", "mm/h", ["Average", "Minimum", "Maximum"], RainRateData, 1024, 250);
                   $(document.body).append("<div id=\"InsideTempsGraph\"></div>");
-                  Raphael.fn.drawGraph("InsideTempsGraph", "Inside Temperature (°C)", "°C", InsideTempData, 1024, 250, 0, 30);
+                  Raphael.fn.drawGraph("InsideTempsGraph", "Inside Temperature (°C)", "°C", ["Average", "Minimum", "Maximum"], InsideTempData, 1024, 250, 0, 30);
                   $(document.body).append("<div id=\"InsideHumidityGraph\"></div>");
-                  Raphael.fn.drawGraph("InsideHumidityGraph", "Inside Humidity (%)", "%", InsideHumidityData, 1024, 250, 0, 100);
+                  Raphael.fn.drawGraph("InsideHumidityGraph", "Inside Humidity (%)", "%", ["Average", "Minimum", "Maximum"], InsideHumidityData, 1024, 250, 0, 100);
               });
         </script>
 

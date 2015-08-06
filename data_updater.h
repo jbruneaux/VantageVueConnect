@@ -27,6 +27,6 @@
 
 int wunderground_update(weather_data_t *weather_data, char *station_id, char* station_password);
 void local_web_init(void);
-int local_web_update(weather_data_t *weather_data, unsigned char* www_root);
+int local_web_update(weather_data_t *weather_data, char* www_root);
 
 #endif

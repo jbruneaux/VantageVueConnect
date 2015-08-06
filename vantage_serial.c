@@ -594,6 +594,8 @@ int VTG_console_init(char* dev_path, VTG_DataReadyIndicateCb_t DataReadyIndicate
                     __FUNCTION__, errno);
     return -1;
   }
+
+  return 0;
 }
 
 void VTG_console_exit(void)

@@ -25,7 +25,7 @@ IDIR=.
 
 CC=${TOOLCHAIN_PATH}/${TOOLCHAIN_PREFIX}-gcc
 #CC=gcc
-CFLAGS=-I$(IDIR) 
+CFLAGS=-I$(IDIR) -Wall
 
 ODIR=obj
 LDIR=../lib 

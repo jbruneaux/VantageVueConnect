@@ -51,7 +51,7 @@ String.prototype.printf = function (obj) {
   }
 };
 
-Raphael.fn.drawGraph = function (holder, title, units_str, dataset, width, height, value_min, value_max) {
+Raphael.fn.drawGraph = function (holder, title, units_str, series_names, dataset, width, height, value_min, value_max) {
     function getAnchors(p1x, p1y, p2x, p2y, p3x, p3y) {
         var l1 = (p2x - p1x) / 2,
             l2 = (p3x - p2x) / 2,
@@ -75,7 +75,10 @@ Raphael.fn.drawGraph = function (holder, title, units_str, dataset, width, heigh
     var colorhue = [
       [0.6],
       [0.2],
-      [0.4]
+      [0.4],
+      [0.7],
+      [0.2],
+      [0.5],
       //[210],
       //[30],
       //[120]
@@ -87,6 +90,9 @@ Raphael.fn.drawGraph = function (holder, title, units_str, dataset, width, heigh
       ["#333"],
       ["#666"],
       ["#999"],
+      ["#AAA"],
+      ["#CCC"],
+      ["#EEE"]
     ];
 
 
@@ -158,11 +164,11 @@ Raphael.fn.drawGraph = function (holder, title, units_str, dataset, width, heigh
             min = min - 1;
         }
     }
-    console.log("Min : " + min + " Max : " + max);
+    //console.log("Min : " + min + " Max : " + max);
     
     var Y = (height - bottomgutter - topgutter) / (max - min);
-    console.log("H.Pixels : +" + (height - bottomgutter - topgutter));
-    console.log("Y: " + Y);
+    //console.log("H.Pixels : +" + (height - bottomgutter - topgutter));
+    //console.log("Y: " + Y);
     
     // Draw grid and set min/max labels
     r.drawGrid(leftgutter + X * .5 + .5, topgutter + .5, width - leftgutter - X, height - topgutter - bottomgutter, 10, 10, "#000");
@@ -174,21 +180,31 @@ Raphael.fn.drawGraph = function (holder, title, units_str, dataset, width, heigh
     var pathes = [];
     var blankets = [];
     var bgp = [];
+    var frame = [];
+    var label = [];
+    var lx = [];
+    var ly = [];
+    var is_label_visible = [];
+    var leave_timer = [];
     for (var j = 0; j<data.length; j++) {
       pathes[j] = r.path().attr({stroke: color[j], "stroke-width": 4, "stroke-linejoin": "round"});
       bgp[j] = r.path().attr({stroke: "none", opacity: .3, fill: color[j]});
-      var label = r.set(),
-          lx = 0, ly = 0,
-          is_label_visible = false,
-          leave_timer;
+      label[j] = r.set();
+      lx[j] = 0;
+      ly[j] = 0;
+      is_label_visible[j] = false,
       blankets[j] = r.set();
     }
 
     /* Create dummy label with almost maximum text sizes so that it's correctly initialized for first display */
-    label.push(r.text(60, 12, max + " " + units_str).attr(txt));
-    //label.push(r.text(60, 27, "01 december 2015 00h00").attr(txt1).attr({fill: color[j]}));
-    label.hide();
-    var frame = r.popup(100, 100, label, "right").attr({fill: "#000", stroke: "#666", "stroke-width": 2, "fill-opacity": .7}).hide();
+    for (var j = 0; j<data.length; j++) {
+        label[j].push(r.text(60, 12, max + " " + units_str).attr(txt));
+        label[j].hide();
+        frame[j] = r.popup(100, 100, label[j], "right").attr({fill: "#000", stroke: "#666", "stroke-width": 2, "fill-opacity": .7}).hide();
+    }
+    //console.log(label);
+
+    
 
     r.text(width / 2, 10, title).attr(txt_title);
 
@@ -199,6 +215,10 @@ Raphael.fn.drawGraph = function (holder, title, units_str, dataset, width, heigh
           var y = Math.round(height - bottomgutter - Y * (data[j][i] - min)),
               x = Math.round(leftgutter + X * (i + .5));
               
+          // Draw lines legends on the left side of the graph
+          r.circle(5, 60 + (j * 15), 4).attr({fill: circle_fill_colors[j], stroke: color[j], "stroke-width": 2});
+          r.text(20, 60 + (j * 15), series_names[j]).attr({font: '12px Helvetica, Arial', fill: color[j], 'text-anchor': 'start'});
+              
           // Only draw X-axis labels on first data set rendering
           if ( !j ) {
               var t = r.text(x, height - 6, labels[i]).attr(txt).toBack();
@@ -206,7 +226,7 @@ Raphael.fn.drawGraph = function (holder, title, units_str, dataset, width, heigh
               t.translate(30, 0);
           }
           if (!i) {
-              console.log("Point " + j + ":" + i + " x: "+ x + " y: " + y);
+              //console.log("Point " + j + ":" + i + " x: "+ x + " y: " + y);
               points[j] = ["M", x, y, "C", x, y];
               bgpp[j] = ["M", leftgutter + X * .5, height - bottomgutter, "L", x, y, "C", x, y];
           }
@@ -224,48 +244,46 @@ Raphael.fn.drawGraph = function (holder, title, units_str, dataset, width, heigh
               points[j] = points[j].concat([x, y, x, y]);
           }
           var dot = r.circle(x, y, 4).attr({fill: circle_fill_colors[j], stroke: color[j], "stroke-width": 2});
-          blankets[j].push(r.rect(leftgutter + X * i, 0, X, height - bottomgutter).attr({stroke: "none", fill: "#fff", opacity: 0}));
-          var rect = blankets[j][blankets[j].length - 1];
-          (function (x, y, data, lbl, dot) {
+          // Create an invisible dot which is slightly larger than the drawn dot to allow easier mouse catch-up
+          var dot_hover = r.circle(x, y, 10).attr({fill: circle_fill_colors[j], stroke: color[j], "stroke-width": 2, opacity: 0});
+          // Add this dot to the set
+          blankets[j].push(dot_hover);
+          
+          (function (x, y, data, index, dot) {
               var timer, i = 0;
-              rect.hover(function () {
-                  clearTimeout(leave_timer);
+              dot_hover.hover(function () {
+                  clearTimeout(leave_timer[index]);
                   var side = "right";
-                  if (x + frame.getBBox().width > width) {
+                  if (x + frame[index].getBBox().width > width) {
                       side = "left";
                   }
-                  var ppp = r.popup(x, y, label, side, 1),
+                  var ppp = r.popup(x, y, label[index], side, 1),
                       anim = Raphael.animation({
                           path: ppp.path,
                           transform: ["t", ppp.dx, ppp.dy]
-                      }, 200 * is_label_visible);
-                  lx = label[0].transform()[0][1] + ppp.dx;
-                  ly = label[0].transform()[0][2] + ppp.dy;
-                  frame.show().stop().animate(anim);
-                  label[0].attr({text: data + " " + units_str}).show().stop().animateWith(frame, anim, {transform: ["t", lx, ly]}, 200 * is_label_visible);
-                  //label[1].attr({text: lbl}).show().stop().animateWith(frame, anim, {transform: ["t", lx, ly]}, 200 * is_label_visible);
+                      }, 200 * is_label_visible[index]);
+                  lx[index] = label[index][0].transform()[0][1] + ppp.dx;
+                  ly[index] = label[index][0].transform()[0][2] + ppp.dy;
+                  frame[index].show().stop().animate(anim);
+                  label[index][0].attr({text: data + " " + units_str}).show().stop().animateWith(frame[index], anim, {transform: ["t", lx[index], ly[index]]}, 200 * is_label_visible[index]);
                   dot.attr("r", 6);
-                  is_label_visible = true;
+                  is_label_visible[index] = true;
               }, function () {
                   dot.attr("r", 4);
-                  leave_timer = setTimeout(function () {
-                      frame.hide();
-                      label[0].hide();
-                      //label[1].hide();
-                      is_label_visible = false;
+                  leave_timer[index] = setTimeout(function () {
+                      frame[index].hide();
+                      label[index][0].hide();
+                      is_label_visible[index] = false;
                   }, 1);
               });
-          })(x, y, data[j][i], labels[i], dot);
+          })(x, y, data[j][i], j, dot);
       }
     }
     for (var j = 0; j<data.length; j++) {
       pathes[j].attr({path: points[j]});
       bgp[j].attr({path: bgpp[j]});
-    }
-    frame.toFront();
-    label[0].toFront();
-    //label[1].toFront();
-    for (var j = 0; j<data.length; j++) {
+      frame[j].toFront();
+      label[j].toFront();
       blankets[j].toFront();
     };
 };

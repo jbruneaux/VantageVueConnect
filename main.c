@@ -18,6 +18,7 @@
  * along with VantageVueConnect.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <getopt.h>
@@ -179,18 +180,18 @@ static void weather_data_ready_indicate_cb(weather_data_t* weather_data)
   {
     fprintf(stdout, "Received weather data\n");
     
-    fprintf(stdout, "\tOutside temperature : %f°C / %fF\n", weather_data->outside_temperature_C, weather_data->outside_temperature_F);
-    fprintf(stdout, "\tOutside chill : %f°C / %fF\n", weather_data->outside_chill_C, weather_data->outside_chill_F);
-    fprintf(stdout, "\tOutside humidity : %d%\n", weather_data->outside_humidity);
-    fprintf(stdout, "\tDew point : %f°C\n", weather_data->dew_point_C);
-    fprintf(stdout, "\tInside temperature : %f°C\n", weather_data->inside_temperature_C);
-    fprintf(stdout, "\tInside humidity : %d%\n", weather_data->inside_humidity);
-    fprintf(stdout, "\tBarometer : %fhPa\n", weather_data->barometric_pressure_Hpa);
-    fprintf(stdout, "\tRain rate : %dmm\n", weather_data->rain_rate_MM);
-    fprintf(stdout, "\tRain day : %dmm\n", weather_data->rain_day_MM);
+    fprintf(stdout, "\tOutside temperature : %fC / %fF\n", weather_data->outside_temperature_C, weather_data->outside_temperature_F);
+    fprintf(stdout, "\tOutside chill : %fC / %fF\n", weather_data->outside_chill_C, weather_data->outside_chill_F);
+    fprintf(stdout, "\tOutside humidity : %d%%\n", weather_data->outside_humidity);
+    fprintf(stdout, "\tDew point : %fC\n", weather_data->dew_point_C);
+    fprintf(stdout, "\tInside temperature : %fC\n", weather_data->inside_temperature_C);
+    fprintf(stdout, "\tInside humidity : %d%%\n", weather_data->inside_humidity);
+    fprintf(stdout, "\tBarometer : %fhPa / %fI\n", weather_data->barometric_pressure_Hpa, weather_data->barometric_pressure_I);
+    fprintf(stdout, "\tRain rate : %fmm\n", weather_data->rain_rate_MM);
+    fprintf(stdout, "\tRain day : %fmm\n", weather_data->rain_day_MM);
     fprintf(stdout, "\tWind Speed : %fkm/h / %fmph\n", weather_data->wind_speed_KPH, weather_data->wind_speed_MPH);
     fprintf(stdout, "\tWind Speed Avg 2m : %fkm/h\n", weather_data->wind_speed_avg_2m_KPH);
-    fprintf(stdout, "\tWind direction : %d°\n", weather_data->wind_direction);
+    fprintf(stdout, "\tWind direction : %d degrees\n", weather_data->wind_direction);
   }
 
   if ( (station_id != NULL) && (station_password != NULL) )

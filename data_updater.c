@@ -26,7 +26,9 @@
 #include <fcntl.h>
 #include <time.h>
 #include <float.h>
+#include <tgmath.h>
 #include <sys/types.h>
+#include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
@@ -35,13 +37,214 @@
 
 #include "data_defs.h"
 
+#define LOCAL_WEB_UPDATE_BUFFER_MALLOC(var, size)     \
+  {                                                   \
+    var = malloc(size);                               \
+    if ( var == NULL )                                \
+    {                                                 \
+      perror("malloc");                               \
+      ret = -1;                                       \
+      goto local_web_update_data_section_exit;        \
+    }                                                 \
+  }
+
+#define FLOAT_SUCCESSIVE_AVERAGE(field) \
+  { \
+    weather_data->weather_data_average.field = ((weather_data->weather_data_average.field * 2.0) + new_weather_data->field) / 3.0; \
+  }
+
+#define INT_SUCCESSIVE_AVERAGE(field) \
+  { \
+    weather_data->weather_data_average.field = ((weather_data->weather_data_average.field * 2) + new_weather_data->field) / 3; \
+  }
+
+#define FLOAT_UPDATE(field) \
+  { \
+    FLOAT_SUCCESSIVE_AVERAGE(field) \
+    weather_data->weather_data_minimums.field = MIN(weather_data->weather_data_minimums.field, new_weather_data->field); \
+    weather_data->weather_data_maximums.field = MAX(weather_data->weather_data_maximums.field, new_weather_data->field); \
+  }
+
+#define INT_UPDATE(field) \
+  { \
+    INT_SUCCESSIVE_AVERAGE(field) \
+    weather_data->weather_data_minimums.field = MIN(weather_data->weather_data_minimums.field, new_weather_data->field); \
+    weather_data->weather_data_maximums.field = MAX(weather_data->weather_data_maximums.field, new_weather_data->field); \
+  }
+
+
+#define FILL_ONE_PARAMETER_VAR_ARRAY(variable_name, format, field, dates_buffer, data_buffer, file_buffer, file_buffer_size, fd) \
+  { \
+    weather_data_entry_t *weather_data_entry;                             \
+    weather_data_t *weather_data;                                         \
+    int data1_len = 0;                                                    \
+    int len;                                                              \
+                                                                          \
+    ret = 0;                                                              \
+                                                                          \
+    TAILQ_FOREACH(weather_data_entry, WeatherDataHead, ListEntry)         \
+    {                                                                     \
+      weather_data = &weather_data_entry->weather_data_average;           \
+      data1_len += snprintf(data_buffer + data1_len,                      \
+                            DATA_CONTENT_BUFFER_SIZE - data1_len,         \
+                            format,                                       \
+                            weather_data->field);                         \
+    }                                                                     \
+    data1_len -= 1;                                                       \
+    data_buffer[data1_len] = '\0';                                        \
+    len = snprintf(file_buffer, file_buffer_size,                         \
+                   "%svar "variable_name" = [[%s],[[%s]]];\n",            \
+                   HTML_VAR_OFFSET,                                       \
+                   dates_buffer, data_buffer);                            \
+                                                                          \
+    n = write(fd, file_buffer, len);                                      \
+    if ( n < len )                                                        \
+    {                                                                     \
+      perror("write");                                                    \
+      ret = -1;                                                           \
+    }                                                                     \
+  }
+
+#define FILL_ONE_PARAMETER_WITH_MIN_MAX_VAR_ARRAY(variable_name, format, field, dates_buffer, avg_data_buffer, min_data_buffer, max_data_buffer, file_buffer, file_buffer_size, fd) \
+  { \
+    weather_data_entry_t *weather_data_entry;                             \
+    weather_data_t *weather_data;                                         \
+    int avg_data_len = 0;                                                 \
+    int min_data_len = 0;                                                 \
+    int max_data_len = 0;                                                 \
+    int len;                                                              \
+                                                                          \
+    ret = 0;                                                              \
+                                                                          \
+    TAILQ_FOREACH(weather_data_entry, WeatherDataHead, ListEntry)         \
+    {                                                                     \
+      weather_data = &weather_data_entry->weather_data_average;           \
+      avg_data_len += snprintf(avg_data_buffer + avg_data_len,            \
+                            DATA_CONTENT_BUFFER_SIZE - avg_data_len,      \
+                            format,                                       \
+                            weather_data->field);                         \
+      weather_data = &weather_data_entry->weather_data_minimums;          \
+      min_data_len += snprintf(min_data_buffer + min_data_len,            \
+                            DATA_CONTENT_BUFFER_SIZE - min_data_len,      \
+                            format,                                       \
+                            weather_data->field);                         \
+      weather_data = &weather_data_entry->weather_data_maximums;          \
+      max_data_len += snprintf(max_data_buffer + max_data_len,            \
+                            DATA_CONTENT_BUFFER_SIZE - max_data_len,      \
+                            format,                                       \
+                            weather_data->field);                         \
+    }                                                                     \
+    avg_data_len -= 1;                                                    \
+    avg_data_buffer[avg_data_len] = '\0';                                 \
+    min_data_len -= 1;                                                    \
+    min_data_buffer[min_data_len] = '\0';                                 \
+    max_data_len -= 1;                                                    \
+    max_data_buffer[max_data_len] = '\0';                                 \
+                                                                          \
+    len = snprintf(file_buffer, file_buffer_size,                         \
+                   "%svar "variable_name" = [[%s],[[%s],[%s],[%s]]];\n",  \
+                   HTML_VAR_OFFSET,                                       \
+                   dates_buffer, avg_data_buffer,                         \
+                   min_data_buffer, max_data_buffer);                     \
+                                                                          \
+    n = write(fd, file_buffer, len);                                      \
+    if ( n < len )                                                        \
+    {                                                                     \
+      perror("write");                                                    \
+      ret = -1;                                                           \
+    }                                                                     \
+  }
+
+#define FILL_TWO_PARAMETERS_WITH_MIN_MAX_VAR_ARRAY(variable_name, format_1, field_1, format_2, field_2, dates_buffer, avg_data_buffer_1, min_data_buffer_1, max_data_buffer_1, avg_data_buffer_2, min_data_buffer_2, max_data_buffer_2, file_buffer, file_buffer_size, fd) \
+  { \
+    weather_data_entry_t *weather_data_entry;                             \
+    weather_data_t *weather_data;                                         \
+    int avg_data_len_1 = 0;                                               \
+    int min_data_len_1 = 0;                                               \
+    int max_data_len_1 = 0;                                               \
+    int avg_data_len_2 = 0;                                               \
+    int min_data_len_2 = 0;                                               \
+    int max_data_len_2 = 0;                                               \
+    int len;                                                              \
+                                                                          \
+    ret = 0;                                                              \
+                                                                          \
+    TAILQ_FOREACH(weather_data_entry, WeatherDataHead, ListEntry)         \
+    {                                                                     \
+      weather_data = &weather_data_entry->weather_data_average;           \
+      /* Field 1 */                                                       \
+      avg_data_len_1 += snprintf(avg_data_buffer_1 + avg_data_len_1,      \
+                            DATA_CONTENT_BUFFER_SIZE - avg_data_len_1,    \
+                            format_1,                                     \
+                            weather_data->field_1);                       \
+      weather_data = &weather_data_entry->weather_data_minimums;          \
+      min_data_len_1 += snprintf(min_data_buffer_1 + min_data_len_1,      \
+                            DATA_CONTENT_BUFFER_SIZE - min_data_len_1,    \
+                            format_1,                                     \
+                            weather_data->field_1);                       \
+      weather_data = &weather_data_entry->weather_data_maximums;          \
+      max_data_len_1 += snprintf(max_data_buffer_1 + max_data_len_1,      \
+                            DATA_CONTENT_BUFFER_SIZE - max_data_len_1,    \
+                            format_1,                                     \
+                            weather_data->field_1);                       \
+       /* Field 2 */                                                      \
+      avg_data_len_2 += snprintf(avg_data_buffer_2 + avg_data_len_2,      \
+                            DATA_CONTENT_BUFFER_SIZE - avg_data_len_2,    \
+                            format_2,                                     \
+                            weather_data->field_2);                       \
+      weather_data = &weather_data_entry->weather_data_minimums;          \
+      min_data_len_2 += snprintf(min_data_buffer_2 + min_data_len_2,      \
+                            DATA_CONTENT_BUFFER_SIZE - min_data_len_2,    \
+                            format_2,                                     \
+                            weather_data->field_2);                       \
+      weather_data = &weather_data_entry->weather_data_maximums;          \
+      max_data_len_2 += snprintf(max_data_buffer_2 + max_data_len_2,      \
+                            DATA_CONTENT_BUFFER_SIZE - max_data_len_2,    \
+                            format_2,                                     \
+                            weather_data->field_2);                       \
+    }                                                                     \
+    avg_data_len_1 -= 1;                                                  \
+    avg_data_buffer_1[avg_data_len_1] = '\0';                             \
+    min_data_len_1 -= 1;                                                  \
+    min_data_buffer_1[min_data_len_1] = '\0';                             \
+    max_data_len_1 -= 1;                                                  \
+    max_data_buffer_1[max_data_len_1] = '\0';                             \
+    avg_data_len_2 -= 1;                                                  \
+    avg_data_buffer_1[avg_data_len_2] = '\0';                             \
+    min_data_len_2 -= 1;                                                  \
+    min_data_buffer_1[min_data_len_2] = '\0';                             \
+    max_data_len_2 -= 1;                                                  \
+    max_data_buffer_1[max_data_len_2] = '\0';                             \
+                                                                          \
+    len = snprintf(file_buffer, file_buffer_size,                         \
+                   "%svar "variable_name" = [[%s],[[%s],[%s],[%s],[%s],[%s],[%s]]];\n",  \
+                   HTML_VAR_OFFSET,                                       \
+                   dates_buffer, avg_data_buffer_1,                       \
+                   min_data_buffer_1, max_data_buffer_1,                  \
+                   avg_data_buffer_2,                                     \
+                   min_data_buffer_2, max_data_buffer_2);                 \
+                                                                          \
+    n = write(fd, file_buffer, len);                                      \
+    if ( n < len )                                                        \
+    {                                                                     \
+      perror("write");                                                    \
+      ret = -1;                                                           \
+    }                                                                     \
+  }
+
 #define WUNDERGROUND_HOST_NAME   "weatherstation.wunderground.com"
 #define WUNDERGROUND_GET_PAGE    "/weatherstation/updateweatherstation.php"
 
+#define HTML_VAR_OFFSET          "                  "
+
 typedef struct weather_data_entry_s
 {
-  /* Actual content (might be shared between different TAILQ) */
-  weather_data_t*             weather_data;
+  /* Average weatehr data */
+  weather_data_t                    weather_data_average;
+
+  /* Min-Max hold */
+  weather_data_t                    weather_data_minimums;
+  weather_data_t                    weather_data_maximums;
 
   /* Chaining entry */
   TAILQ_ENTRY(weather_data_entry_s) ListEntry;
@@ -55,13 +258,15 @@ TAILQ_HEAD(WeatherDataHead_s, weather_data_entry_s) WeatherDataHead_LastTenM, We
 #define HOUR_WEATHER_DATA_COUNT  ((60*60) / HOUR_WEATHER_DATA_GRANULARITY_IN_S)
 #define HOUR_WEATHER_DATA_SKIP_COUNT       (HOUR_WEATHER_DATA_GRANULARITY_IN_S / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
 unsigned int hour_weather_data_counter = 0;
-unsigned int hour_weather_data_skip_counter = HOUR_WEATHER_DATA_SKIP_COUNT;
+unsigned int hour_weather_data_skip_counter = HOUR_WEATHER_DATA_SKIP_COUNT - 1;
+weather_data_entry_t hour_weather_data;
 
 #define DAY_WEATHER_DATA_GRANULARITY_IN_S    3600
 #define DAY_WEATHER_DATA_COUNT  ((24*60*60) / DAY_WEATHER_DATA_GRANULARITY_IN_S)
 #define DAY_WEATHER_DATA_SKIP_COUNT       (DAY_WEATHER_DATA_GRANULARITY_IN_S / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
 unsigned int day_weather_data_counter = 0;
-unsigned int day_weather_data_skip_counter = DAY_WEATHER_DATA_SKIP_COUNT;
+unsigned int day_weather_data_skip_counter = DAY_WEATHER_DATA_SKIP_COUNT - 1;
+weather_data_entry_t day_weather_data;
 
 
 #define DATE_CONTENT_BUFFER_SIZE  (TENM_WEATHER_DATA_COUNT * 25) /* 23 is the maximum characters count used by
@@ -75,9 +280,9 @@ int wunderground_update(weather_data_t *weather_data, char *station_id, char* st
 {
   struct sockaddr_in serveraddr;
   struct hostent *server;
-  unsigned char get_request_content[1024];
-  unsigned char request[1024];
-  unsigned char* http_str;
+  char get_request_content[1024];
+  char request[1024];
+  char* http_str;
   int j;
 
   if ( loglevel > 1 )
@@ -136,14 +341,14 @@ int wunderground_update(weather_data_t *weather_data, char *station_id, char* st
 
   }
   j += snprintf(get_request_content + j, sizeof(get_request_content)-j, 
-                "&humidity=%d&tempf=%2.1f&dewptf=%2.1f&indoortempf=%2.1f&indoorhumidity=%2.1f",
+                "&humidity=%d&tempf=%2.1f&dewptf=%2.1f&indoortempf=%2.1f&indoorhumidity=%d",
                 weather_data->outside_humidity, weather_data->outside_temperature_F, weather_data->dew_point_F, 
                 weather_data->inside_temperature_F, weather_data->inside_humidity);
   j += snprintf(get_request_content + j, sizeof(get_request_content)-j, 
                 "&baromin=%3.1f",
                 weather_data->barometric_pressure_I);
   j += snprintf(get_request_content + j, sizeof(get_request_content)-j, 
-                "&dailyrainin=",
+                "&dailyrainin=%4.1f",
                 weather_data->rain_day_I);
 
   snprintf(request, sizeof(request), 
@@ -192,7 +397,7 @@ int wunderground_update(weather_data_t *weather_data, char *station_id, char* st
 
 void local_web_init(void)
 {
-  /* Initialize list */
+  /* Initialize queues */
   TAILQ_INIT(&(WeatherDataHead_LastTenM));
   TAILQ_INIT(&(WeatherDataHead_LastHour));
   TAILQ_INIT(&(WeatherDataHead_LastDay));
@@ -200,8 +405,10 @@ void local_web_init(void)
 
 static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* WeatherDataHead)
 {
-  unsigned char *file_data = NULL, *dates_content = NULL, *data_content_1 = NULL, *data_content_2 = NULL;
-  int i, ret = 0, n, len, dates_len, data1_len, data2_len, file_data_size;
+  char *file_data = NULL, *dates_content = NULL, 
+       *data_content_1 = NULL, *data_content_2 = NULL, 
+       *data_content_3 = NULL;
+  int records_count, ret = 0, n, dates_len, file_data_size;
   weather_data_entry_t *tmp;
   weather_data_t *weather_data;
 
@@ -210,60 +417,17 @@ static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* W
     fprintf(stderr, "+%s\n", __FUNCTION__);
   }
 
-  dates_content = malloc(DATE_CONTENT_BUFFER_SIZE);
-  if ( dates_content == NULL )
-  {
-    perror("malloc");
-    ret = -1;
-    goto local_web_update_data_section_exit;
-  }
+  LOCAL_WEB_UPDATE_BUFFER_MALLOC(dates_content, DATE_CONTENT_BUFFER_SIZE);
 
-  data_content_1 = malloc(DATA_CONTENT_BUFFER_SIZE);
-  if ( data_content_1 == NULL )
-  {
-    perror("malloc");
-    ret = -1;
-    goto local_web_update_data_section_exit;
-  }
+  LOCAL_WEB_UPDATE_BUFFER_MALLOC(data_content_1, DATA_CONTENT_BUFFER_SIZE);
+  LOCAL_WEB_UPDATE_BUFFER_MALLOC(data_content_2, DATA_CONTENT_BUFFER_SIZE);
+  LOCAL_WEB_UPDATE_BUFFER_MALLOC(data_content_3, DATA_CONTENT_BUFFER_SIZE);
 
-  data_content_2 = malloc(DATA_CONTENT_BUFFER_SIZE);
-  if ( data_content_2 == NULL )
-  {
-    perror("malloc");
-    ret = -1;
-    goto local_web_update_data_section_exit;
-  }
-
-  i = 0;
-  dates_len = 0;
-  TAILQ_FOREACH(tmp, WeatherDataHead, ListEntry) 
-  {
-    weather_data = tmp->weather_data;
-    dates_len += snprintf(dates_content + dates_len, DATE_CONTENT_BUFFER_SIZE - dates_len, "\"%04d-%02d-%02d %02d:%02d:%02d\",", weather_data->tm.tm_year + 1900, weather_data->tm.tm_mon + 1, weather_data->tm.tm_mday, weather_data->tm.tm_hour, weather_data->tm.tm_min, weather_data->tm.tm_sec);
-    i++;
-  }
-  dates_len -= 1;
-  dates_content[dates_len] = '\0';
-
-  if ( loglevel > 1 )
-  {
-    fprintf(stdout, "Updating web using %d records\n", i);
-  }
-
-  data1_len = 0;
-  data2_len = 0;
-  TAILQ_FOREACH(tmp, WeatherDataHead, ListEntry) 
-  {
-    weather_data = tmp->weather_data;
-    data1_len += snprintf(data_content_1 + data1_len, DATA_CONTENT_BUFFER_SIZE - data1_len, "\"%2.1f\",", weather_data->outside_temperature_C);
-    data2_len += snprintf(data_content_2 + data2_len, DATA_CONTENT_BUFFER_SIZE - data2_len, "\"%2.1f\",", weather_data->outside_chill_C);
-  }
-  data1_len -= 1;
-  data2_len -= 1;
-  data_content_1[data1_len] = '\0';
-  data_content_2[data2_len] = '\0';
-
-  file_data_size = dates_len + data1_len + data2_len + 200;  
+  /* Allocate a temporary buffer which will be used to store datas to be written
+   * to the output file.
+   * Use the size of the dates and data contents for the buffer allocation size.
+   */
+  file_data_size = DATE_CONTENT_BUFFER_SIZE + (DATA_CONTENT_BUFFER_SIZE * 3) + 200;
   file_data = malloc(file_data_size);
   if ( file_data == NULL )
   {
@@ -271,125 +435,119 @@ static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* W
     ret = -1;
     goto local_web_update_data_section_exit;
   }
-
   memset(file_data, '\0', file_data_size);
 
-  len = snprintf(file_data, file_data_size, "                  var OutsideTempData = [[%s],[[%s],[%s]]];\n", dates_content, data_content_1, data_content_2);
-
-  n = write(fd_out, file_data, len);
-  if ( n < len )
+  /* Create dates strings */
+  records_count = 0;
+  dates_len = 0;
+  TAILQ_FOREACH(tmp, WeatherDataHead, ListEntry) 
   {
-    perror("write");
-    ret = -1;
+    weather_data = &tmp->weather_data_average;
+    dates_len += snprintf(dates_content + dates_len,
+                          DATE_CONTENT_BUFFER_SIZE - dates_len,
+                          "\"%04d-%02d-%02d %02d:%02d:%02d\",",
+                          weather_data->tm.tm_year + 1900,
+                          weather_data->tm.tm_mon + 1,
+                          weather_data->tm.tm_mday,
+                          weather_data->tm.tm_hour,
+                          weather_data->tm.tm_min,
+                          weather_data->tm.tm_sec);
+    records_count++;
+  }
+  dates_len -= 1;
+  dates_content[dates_len] = '\0';
+
+  if ( loglevel > 1 )
+  {
+    fprintf(stdout, "Updating local web page using %d records\n", records_count);
+  }
+
+
+  /* Fill the outside temperature data */
+  FILL_ONE_PARAMETER_WITH_MIN_MAX_VAR_ARRAY("OutsideTempData", 
+                               "\"%2.1f\",", outside_temperature_C,
+                               dates_content, data_content_1,
+                               data_content_2, data_content_3, 
+                               file_data, file_data_size, fd_out);
+  if ( ret != 0 )
+  {
     goto local_web_update_data_section_exit;
   }
 
-  data1_len = 0;
-  TAILQ_FOREACH(tmp, WeatherDataHead, ListEntry) 
+  /* Fill the outside chill data */
+  FILL_ONE_PARAMETER_WITH_MIN_MAX_VAR_ARRAY("OutsideChillData", 
+                               "\"%2.1f\",", outside_chill_C,
+                               dates_content, data_content_1,
+                               data_content_2, data_content_3, 
+                               file_data, file_data_size, fd_out);
+  if ( ret != 0 )
   {
-    weather_data = tmp->weather_data;
-    data1_len += snprintf(data_content_1 + data1_len, DATA_CONTENT_BUFFER_SIZE - data1_len, "\"%d\",", weather_data->outside_humidity);
-  }
-  data1_len -= 1;
-  data_content_1[data1_len] = '\0';
-  len = snprintf(file_data, file_data_size, "                  var OutsideHumidityData = [[%s],[[%s]]];\n", dates_content, data_content_1);
-
-  n = write(fd_out, file_data, len);
-  if ( n < len )
-  {
-    perror("write");
-    ret = -1;
     goto local_web_update_data_section_exit;
   }
 
-
-  data1_len = 0;
-  TAILQ_FOREACH(tmp, WeatherDataHead, ListEntry) 
+  /* Fill the outside humidity data */
+  FILL_ONE_PARAMETER_WITH_MIN_MAX_VAR_ARRAY("OutsideHumidityData", 
+                               "\"%d\",", outside_humidity,
+                               dates_content, data_content_1,
+                               data_content_2, data_content_3, 
+                               file_data, file_data_size, fd_out);
+  if ( ret != 0 )
   {
-    weather_data = tmp->weather_data;
-    data1_len += snprintf(data_content_1 + data1_len, DATA_CONTENT_BUFFER_SIZE - data1_len, "\"%4.1f\",", weather_data->barometric_pressure_Hpa);
-  }
-  data1_len -= 1;
-  data_content_1[data1_len] = '\0';
-  len = snprintf(file_data, file_data_size, "                  var BarometerData = [[%s],[[%s]]];\n", dates_content, data_content_1);
-
-  n = write(fd_out, file_data, len);
-  if ( n < len )
-  {
-    perror("write");
-    ret = -1;
     goto local_web_update_data_section_exit;
   }
 
-  data1_len = 0;
-  TAILQ_FOREACH(tmp, WeatherDataHead, ListEntry) 
+  /* Fill the barometric data */
+  FILL_ONE_PARAMETER_WITH_MIN_MAX_VAR_ARRAY("BarometerData", 
+                               "\"%4.1f\",", barometric_pressure_Hpa,
+                               dates_content, data_content_1,
+                               data_content_2, data_content_3, 
+                               file_data, file_data_size, fd_out);
+  if ( ret != 0 )
   {
-    weather_data = tmp->weather_data;
-    data1_len += snprintf(data_content_1 + data1_len, DATA_CONTENT_BUFFER_SIZE - data1_len, "\"%4.1f\",", weather_data->wind_speed_KPH);
-  }
-  data1_len -= 1;
-  data_content_1[data1_len] = '\0';
-  len = snprintf(file_data, file_data_size, "                  var WindSpeedData = [[%s],[[%s]]];\n", dates_content, data_content_1);
-
-  n = write(fd_out, file_data, len);
-  if ( n < len )
-  {
-    perror("write");
-    ret = -1;
     goto local_web_update_data_section_exit;
   }
 
-  data1_len = 0;
-  TAILQ_FOREACH(tmp, WeatherDataHead, ListEntry) 
+  /* Fill the wind speed data */
+  FILL_ONE_PARAMETER_WITH_MIN_MAX_VAR_ARRAY("WindSpeedData", 
+                               "\"%4.1f\",", wind_speed_KPH,
+                               dates_content, data_content_1,
+                               data_content_2, data_content_3, 
+                               file_data, file_data_size, fd_out);
+  if ( ret != 0 )
   {
-    weather_data = tmp->weather_data;
-    data1_len += snprintf(data_content_1 + data1_len, DATA_CONTENT_BUFFER_SIZE - data1_len, "\"%4.1f\",", weather_data->rain_rate_MM);
-  }
-  data1_len -= 1;
-  data_content_1[data1_len] = '\0';
-  len = snprintf(file_data, file_data_size, "                  var RainRateData = [[%s],[[%s]]];\n", dates_content, data_content_1);
-
-  n = write(fd_out, file_data, len);
-  if ( n < len )
-  {
-    perror("write");
-    ret = -1;
     goto local_web_update_data_section_exit;
   }
 
-  data1_len = 0;
-  TAILQ_FOREACH(tmp, WeatherDataHead, ListEntry) 
+  /* Fill the rain data */
+  FILL_ONE_PARAMETER_WITH_MIN_MAX_VAR_ARRAY("RainRateData", 
+                               "\"%4.1f\",", rain_rate_MM,
+                               dates_content, data_content_1,
+                               data_content_2, data_content_3,
+                               file_data, file_data_size, fd_out);
+  if ( ret != 0 )
   {
-    weather_data = tmp->weather_data;
-    data1_len += snprintf(data_content_1 + data1_len, DATA_CONTENT_BUFFER_SIZE - data1_len, "\"%2.1f\",", weather_data->inside_temperature_C);
-  }
-  data1_len -= 1;
-  data_content_1[data1_len] = '\0';
-  len = snprintf(file_data, file_data_size, "                  var InsideTempData = [[%s],[[%s]]];\n", dates_content, data_content_1);
-
-  n = write(fd_out, file_data, len);
-  if ( n < len )
-  {
-    perror("write");
-    ret = -1;
     goto local_web_update_data_section_exit;
   }
 
-  data1_len = 0;
-  TAILQ_FOREACH(tmp, WeatherDataHead, ListEntry) 
+  /* Fill the inside temperature data */
+  FILL_ONE_PARAMETER_WITH_MIN_MAX_VAR_ARRAY("InsideTempData", 
+                               "\"%2.1f\",", inside_temperature_C,
+                               dates_content, data_content_1,
+                               data_content_2, data_content_3,
+                               file_data, file_data_size, fd_out);
+  if ( ret != 0 )
   {
-    weather_data = tmp->weather_data;
-    data1_len += snprintf(data_content_1 + data1_len, DATA_CONTENT_BUFFER_SIZE - data1_len, "\"%d\",", weather_data->inside_humidity);
+    goto local_web_update_data_section_exit;
   }
-  data1_len -= 1;
-  data_content_1[data1_len] = '\0';
-  len = snprintf(file_data, file_data_size, "                  var InsideHumidityData = [[%s],[[%s]]];\n", dates_content, data_content_1);
 
-  n = write(fd_out, file_data, len);
-  if ( n < len )
+  /* Fill the inside humidity data */
+  FILL_ONE_PARAMETER_WITH_MIN_MAX_VAR_ARRAY("InsideHumidityData", 
+                               "\"%d\",", inside_humidity,
+                               dates_content, data_content_1,
+                               data_content_2, data_content_3,
+                               file_data, file_data_size, fd_out);
+  if ( ret != 0 )
   {
-    perror("write");
-    ret = -1;
     goto local_web_update_data_section_exit;
   }
 
@@ -402,6 +560,8 @@ local_web_update_data_section_exit:
     free(data_content_1);
   if ( data_content_2 != NULL )
     free(data_content_2);
+  if ( data_content_3 != NULL )
+    free(data_content_3);
 
   if ( loglevel > 1 )
   {
@@ -411,14 +571,64 @@ local_web_update_data_section_exit:
   return ret;
 }
 
-int local_web_update(weather_data_t *weather_data, unsigned char* www_root)
+void update_average_weather_data(weather_data_entry_t *weather_data, int data_counter, weather_data_t *new_weather_data)
 {
-  unsigned char html_path[1024];
-  unsigned char* file_content = NULL;
-  int ret = 0, fd_in_b = -1, fd_in_e = -1, fd_out_tenm = -1, fd_out_hour = -1, fd_out_day = -1, n, len, file1_size, file2_size;
+  /* This is the first time we call this function for the given average data structure, 
+   * simply initialize it with the current weather data content
+   */  
+  if ( data_counter == 0 )
+  {
+    memcpy(&weather_data->weather_data_average, new_weather_data, sizeof(weather_data_t));
+    memcpy(&weather_data->weather_data_minimums, new_weather_data, sizeof(weather_data_t));
+    memcpy(&weather_data->weather_data_maximums, new_weather_data, sizeof(weather_data_t));
+  }
+  else
+  {
+    FLOAT_UPDATE(outside_temperature_F);
+    FLOAT_UPDATE(outside_temperature_C);
+    FLOAT_UPDATE(outside_chill_F);
+    FLOAT_UPDATE(outside_chill_C);
+    FLOAT_UPDATE(dew_point_F);
+    FLOAT_UPDATE(dew_point_C);
+
+    FLOAT_UPDATE(inside_temperature_F);
+    FLOAT_UPDATE(inside_temperature_C);
+
+    FLOAT_UPDATE(rain_rate_I);
+    FLOAT_UPDATE(rain_rate_MM);
+    FLOAT_UPDATE(rain_day_I);
+    FLOAT_UPDATE(rain_day_MM);
+
+    FLOAT_UPDATE(wind_speed_MPH);
+    FLOAT_UPDATE(wind_speed_KPH);
+    FLOAT_UPDATE(wind_speed_avg_2m_MPH);
+    FLOAT_UPDATE(wind_speed_avg_2m_KPH);
+
+    INT_SUCCESSIVE_AVERAGE(wind_direction);
+    FLOAT_UPDATE(wind_gust);
+    FLOAT_UPDATE(wind_gust_10m);
+    INT_SUCCESSIVE_AVERAGE(wind_direction_gust_10m);
+
+    INT_SUCCESSIVE_AVERAGE(outside_humidity);
+    INT_SUCCESSIVE_AVERAGE(inside_humidity);
+    FLOAT_UPDATE(barometric_pressure_I);
+    FLOAT_UPDATE(barometric_pressure_Hpa);
+  }
+}
+
+void reset_average_weather_data(weather_data_entry_t *weather_data)
+{
+  memset(&weather_data->weather_data_average, 0, sizeof(weather_data_t));
+  memset(&weather_data->weather_data_minimums, 0, sizeof(weather_data_t));
+  memset(&weather_data->weather_data_maximums, 0, sizeof(weather_data_t));
+}
+
+int local_web_update(weather_data_t *weather_data, char* www_root)
+{
+  char html_path[1024];
+  char* file_content = NULL;
+  int ret = 0, fd_in_b = -1, fd_in_e = -1, fd_out_tenm = -1, fd_out_hour = -1, fd_out_day = -1, n, file1_size, file2_size;
   struct stat file_stat;
-  struct tm tm = weather_data->tm;
-  weather_data_t *weather_data_copy;
   weather_data_entry_t *tmp, *new_tenm, *new_hour, *new_day;
 
   if ( loglevel > 1 )
@@ -426,6 +636,7 @@ int local_web_update(weather_data_t *weather_data, unsigned char* www_root)
     fprintf(stderr, "+%s\n", __FUNCTION__);
   }
 
+  /* Allocate a new entry for ten minute history the queue */
   new_tenm = malloc(sizeof(weather_data_entry_t));
   if ( new_tenm == NULL )
   {
@@ -433,38 +644,8 @@ int local_web_update(weather_data_t *weather_data, unsigned char* www_root)
     return -1;
   }
 
-  new_hour = malloc(sizeof(weather_data_entry_t));
-  if ( new_hour == NULL )
-  {
-    perror("malloc");
-    free(new_tenm);
-    return -1;
-  }
-
-  new_day = malloc(sizeof(weather_data_entry_t));
-  if ( new_day == NULL )
-  {
-    perror("malloc");
-    free(new_tenm);
-    free(new_hour);
-    return -1;
-  }
-
-  weather_data_copy = malloc(sizeof(weather_data_t));
-  if ( weather_data_copy == NULL )
-  {
-    perror("malloc");
-    free(new_tenm);
-    free(new_hour);
-    free(new_day);
-    return -1;
-  }
-  
-  memcpy(weather_data_copy, weather_data, sizeof(weather_data_t));
-
-  new_tenm->weather_data = weather_data_copy;
-  new_hour->weather_data = weather_data_copy;
-  new_day->weather_data = weather_data_copy;
+  /* Backup the weather data for the ten minute history */
+  update_average_weather_data(new_tenm, 0 /* force overwrite */, weather_data);
 
   /* If the 10 minute weather data list has reached its maximum, then remove
    * the first (oldest) element
@@ -484,14 +665,24 @@ int local_web_update(weather_data_t *weather_data, unsigned char* www_root)
   TAILQ_INSERT_TAIL(&WeatherDataHead_LastTenM, new_tenm, ListEntry);
   tenm_weather_data_counter++;
 
-  /* Update the hour data only every X received data TODO : Average over the last minute ?*/
+  /* Add the current weather data to the average weather data */
+  update_average_weather_data(&hour_weather_data, 
+                              (hour_weather_data_counter == 0) ? 0:hour_weather_data_skip_counter,
+                              weather_data);
+
+  /* Update the hour data only every X received data */
+  hour_weather_data_skip_counter ++;
   if ( loglevel > 2 )
   {
     fprintf(stdout, "H s%d/%d c%d/%d\n", hour_weather_data_skip_counter, HOUR_WEATHER_DATA_SKIP_COUNT,
              hour_weather_data_counter, HOUR_WEATHER_DATA_COUNT);
   }
+
   if ( hour_weather_data_skip_counter == HOUR_WEATHER_DATA_SKIP_COUNT )
   {
+    /* Remove the oldest weather data of the tail queue when 
+     * the entry counter has reached the history depth point count
+     */
     if ( hour_weather_data_counter == HOUR_WEATHER_DATA_COUNT )
     {
       tmp = TAILQ_FIRST(&WeatherDataHead_LastHour);
@@ -499,28 +690,65 @@ int local_web_update(weather_data_t *weather_data, unsigned char* www_root)
       free(tmp);
       hour_weather_data_counter--;
     }
+
+    /* Allocate a new entry for the queue */    
+    new_hour = malloc(sizeof(weather_data_entry_t));
+    if ( new_hour == NULL )
+    {
+      perror("malloc");
+      return -1;
+    }
+
+    /* Backup the average weather data for hour history */
+    memcpy(new_hour, &hour_weather_data, sizeof(weather_data_entry_t));
+
+    /* Insert the new entry to the tail of the queue */
     TAILQ_INSERT_TAIL(&WeatherDataHead_LastHour, new_hour, ListEntry);
     hour_weather_data_counter++;
+    reset_average_weather_data(&hour_weather_data);
   }
 
-  /* Update the day data only every X received data TODO : Average over the last hour ?*/
+  /* Add the current weather data to the average weather data */
+  update_average_weather_data(&day_weather_data, 
+                              (day_weather_data_counter == 0) ? 0:day_weather_data_skip_counter,
+                              weather_data);
+
+  /* Update the day data only every X received data */
+  day_weather_data_skip_counter ++;
   if ( loglevel > 2 )
   {
     fprintf(stdout, "D s%d/%d c%d/%d\n", day_weather_data_skip_counter, DAY_WEATHER_DATA_SKIP_COUNT,
              day_weather_data_counter, DAY_WEATHER_DATA_COUNT);
   }
+
   if ( day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT )
   {
+    /* Remove the oldest weather data of the tail queue when 
+     * the entry counter has reached the history depth point count
+     */
     if ( day_weather_data_counter == DAY_WEATHER_DATA_COUNT )
     {
       tmp = TAILQ_FIRST(&WeatherDataHead_LastDay);
       TAILQ_REMOVE(&WeatherDataHead_LastDay, tmp, ListEntry);
-      free(tmp->weather_data);
       free(tmp);
       day_weather_data_counter--;
     }
+
+    /* Allocate a new entry for the queue */  
+    new_day = malloc(sizeof(weather_data_entry_t));
+    if ( new_day == NULL )
+    {
+      perror("malloc");
+      return -1;
+    }
+
+    /* Backup the average weather data for hour history */
+    memcpy(new_day, &day_weather_data, sizeof(weather_data_entry_t));
+
+    /* Insert the new entry to the tail of the queue */
     TAILQ_INSERT_TAIL(&WeatherDataHead_LastDay, new_day, ListEntry);
     day_weather_data_counter++;
+    reset_average_weather_data(&day_weather_data);
   }
   
 
@@ -710,14 +938,11 @@ local_web_update_exit:
   {
     hour_weather_data_skip_counter = 0;
   }
-  hour_weather_data_skip_counter ++;
-
 
   if ( day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT )
   {
     day_weather_data_skip_counter = 0;
   }
-  day_weather_data_skip_counter ++;
 
   if ( loglevel > 1 )
   {
