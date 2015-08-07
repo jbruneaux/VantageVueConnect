@@ -348,8 +348,13 @@ int wunderground_update(weather_data_t *weather_data, char *station_id, char* st
                 "&baromin=%3.1f",
                 weather_data->barometric_pressure_I);
   j += snprintf(get_request_content + j, sizeof(get_request_content)-j, 
-                "&dailyrainin=%4.1f",
+                "&dailyrainin=%3.1f",
                 weather_data->rain_day_I);
+
+  if ( loglevel > 2 )
+  {
+    fprintf(stderr, "%s\n", get_request_content);
+  }
 
   snprintf(request, sizeof(request), 
            "GET %s HTTP/1.0\r\n"  // POST or GET, both tested and works. Both HTTP 1.0 HTTP 1.1 works, but sometimes 
@@ -366,7 +371,11 @@ int wunderground_update(weather_data_t *weather_data, char *station_id, char* st
   bzero(request, sizeof(request));
    
   recv(tcpSocket, request, sizeof(request), 0);
-  //printf("Received :\n%s", request);
+
+  if ( loglevel > 2 )
+  {
+    fprintf(stderr, "Received :\n%s", request);
+  }
 
   http_str = strstr(request, "HTTP/");
   if ( http_str != NULL )
