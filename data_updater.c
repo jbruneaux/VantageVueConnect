@@ -604,13 +604,13 @@ void update_average_weather_data(weather_data_entry_t *weather_data, int data_co
     FLOAT_UPDATE(wind_speed_avg_2m_MPH);
     FLOAT_UPDATE(wind_speed_avg_2m_KPH);
 
-    INT_SUCCESSIVE_AVERAGE(wind_direction);
+    INT_UPDATE(wind_direction);
     FLOAT_UPDATE(wind_gust);
     FLOAT_UPDATE(wind_gust_10m);
-    INT_SUCCESSIVE_AVERAGE(wind_direction_gust_10m);
+    INT_UPDATE(wind_direction_gust_10m);
 
-    INT_SUCCESSIVE_AVERAGE(outside_humidity);
-    INT_SUCCESSIVE_AVERAGE(inside_humidity);
+    INT_UPDATE(outside_humidity);
+    INT_UPDATE(inside_humidity);
     FLOAT_UPDATE(barometric_pressure_I);
     FLOAT_UPDATE(barometric_pressure_Hpa);
   }
