@@ -251,28 +251,43 @@ typedef struct weather_data_entry_s
   TAILQ_ENTRY(weather_data_entry_s) ListEntry;
 } weather_data_entry_t;
 
-#define TENM_WEATHER_DATA_COUNT  ((10*60) / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
+#define TENM_WEATHER_DATA_GRANULARITY_IN_S VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S  /* 1 point per request */
+#define TENM_WEATHER_DATA_COUNT            ((10*60) / TENM_WEATHER_DATA_GRANULARITY_IN_S)
 unsigned int tenm_weather_data_counter = 0;
-TAILQ_HEAD(WeatherDataHead_s, weather_data_entry_s) WeatherDataHead_LastTenM, WeatherDataHead_LastHour, WeatherDataHead_LastDay;
+TAILQ_HEAD(WeatherDataHead_s, weather_data_entry_s) WeatherDataHead_LastTenM, WeatherDataHead_LastHour, WeatherDataHead_LastDay, WeatherDataHead_LastMonth, WeatherDataHead_LastYear;
 
-#define HOUR_WEATHER_DATA_GRANULARITY_IN_S    60
-#define HOUR_WEATHER_DATA_COUNT  ((60*60) / HOUR_WEATHER_DATA_GRANULARITY_IN_S)
+#define HOUR_WEATHER_DATA_GRANULARITY_IN_S 60  /* 1 point per minute */
+#define HOUR_WEATHER_DATA_COUNT            ((60*60) / HOUR_WEATHER_DATA_GRANULARITY_IN_S)
 #define HOUR_WEATHER_DATA_SKIP_COUNT       (HOUR_WEATHER_DATA_GRANULARITY_IN_S / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
 unsigned int hour_weather_data_counter = 0;
 unsigned int hour_weather_data_skip_counter = HOUR_WEATHER_DATA_SKIP_COUNT - 1;
 weather_data_entry_t hour_weather_data;
 
-#define DAY_WEATHER_DATA_GRANULARITY_IN_S    3600
-#define DAY_WEATHER_DATA_COUNT  ((24*60*60) / DAY_WEATHER_DATA_GRANULARITY_IN_S)
-#define DAY_WEATHER_DATA_SKIP_COUNT       (DAY_WEATHER_DATA_GRANULARITY_IN_S / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
+#define DAY_WEATHER_DATA_GRANULARITY_IN_S  (60*HOUR_WEATHER_DATA_GRANULARITY_IN_S) /* 1 point per hour */
+#define DAY_WEATHER_DATA_COUNT             ((24*60*60) / DAY_WEATHER_DATA_GRANULARITY_IN_S)
+#define DAY_WEATHER_DATA_SKIP_COUNT        (DAY_WEATHER_DATA_GRANULARITY_IN_S / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
 unsigned int day_weather_data_counter = 0;
 unsigned int day_weather_data_skip_counter = DAY_WEATHER_DATA_SKIP_COUNT - 1;
 weather_data_entry_t day_weather_data;
 
+#define MONTH_WEATHER_DATA_GRANULARITY_IN_S (24*DAY_WEATHER_DATA_GRANULARITY_IN_S) /* 1 point per day */
+#define MONTH_WEATHER_DATA_COUNT            ((31*24*60*60) / MONTH_WEATHER_DATA_GRANULARITY_IN_S)
+#define MONTH_WEATHER_DATA_SKIP_COUNT       (MONTH_WEATHER_DATA_GRANULARITY_IN_S / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
+unsigned int month_weather_data_counter = 0;
+unsigned int month_weather_data_skip_counter = MONTH_WEATHER_DATA_SKIP_COUNT - 1;
+weather_data_entry_t month_weather_data;
 
-#define DATE_CONTENT_BUFFER_SIZE  (TENM_WEATHER_DATA_COUNT * 25) /* 23 is the maximum characters count used by
+#define YEAR_WEATHER_DATA_GRANULARITY_IN_S (31*MONTH_WEATHER_DATA_GRANULARITY_IN_S) /* 1 point per month */
+#define YEAR_WEATHER_DATA_COUNT            ((365*31*24*60*60) / YEAR_WEATHER_DATA_GRANULARITY_IN_S)
+#define YEAR_WEATHER_DATA_SKIP_COUNT       (YEAR_WEATHER_DATA_GRANULARITY_IN_S / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
+unsigned int year_weather_data_counter = 0;
+unsigned int year_weather_data_skip_counter = YEAR_WEATHER_DATA_SKIP_COUNT - 1;
+weather_data_entry_t year_weather_data;
+
+/* Set the buffer sizes to the maximum count of point per data set */
+#define DATE_CONTENT_BUFFER_SIZE  (YEAR_WEATHER_DATA_COUNT * 25) /* 23 is the maximum characters count used by
                                                                   * a date : '"YYYY-MM-DD HH:MM:SS",' */
-#define DATA_CONTENT_BUFFER_SIZE  (TENM_WEATHER_DATA_COUNT * 10) /* 9 is the maximum characters count used by
+#define DATA_CONTENT_BUFFER_SIZE  (YEAR_WEATHER_DATA_COUNT * 10) /* 9 is the maximum characters count used by
                                                                   * a float value : '"XXXX.X",' */
 
 extern int loglevel;
@@ -445,6 +460,8 @@ void local_web_init(void)
   TAILQ_INIT(&(WeatherDataHead_LastTenM));
   TAILQ_INIT(&(WeatherDataHead_LastHour));
   TAILQ_INIT(&(WeatherDataHead_LastDay));
+  TAILQ_INIT(&(WeatherDataHead_LastMonth));
+  TAILQ_INIT(&(WeatherDataHead_LastYear));
 }
 
 static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* WeatherDataHead)
@@ -671,9 +688,12 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
 {
   char html_path[1024];
   char* file_content = NULL;
-  int ret = 0, fd_in_b = -1, fd_in_e = -1, fd_out_tenm = -1, fd_out_hour = -1, fd_out_day = -1, n, file1_size, file2_size;
+  int ret = 0;
+  int fd_in_b = -1, fd_in_e = -1;
+  int fd_out_tenm = -1, fd_out_hour = -1, fd_out_day = -1, fd_out_month = -1, fd_out_year = -1;
+  int n, file1_size, file2_size;
   struct stat file_stat;
-  weather_data_entry_t *tmp, *new_tenm, *new_hour, *new_day;
+  weather_data_entry_t *tmp, *new_tenm, *new_hour, *new_day, *new_month, *new_year;
 
   if (loglevel > 1)
   {
@@ -794,7 +814,93 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
     day_weather_data_counter++;
     reset_average_weather_data(&day_weather_data);
   }
+
+  /* Add the current weather data to the average weather data */
+  update_average_weather_data(&month_weather_data, 
+                              (month_weather_data_counter == 0) ? 0:month_weather_data_skip_counter,
+                              weather_data);
+
+  /* Update the month data only every X received data */
+  month_weather_data_skip_counter ++;
+  if (loglevel > 2)
+  {
+    LOG_printf(LOG_LVL_DEBUG, "M s%d/%d c%d/%d\n", month_weather_data_skip_counter, MONTH_WEATHER_DATA_SKIP_COUNT,
+             month_weather_data_counter, MONTH_WEATHER_DATA_COUNT);
+  }
+
+  if (month_weather_data_skip_counter == MONTH_WEATHER_DATA_SKIP_COUNT)
+  {
+    /* Remove the oldest weather data of the tail queue when 
+     * the entry counter has reached the history depth point count
+     */
+    if (month_weather_data_counter == MONTH_WEATHER_DATA_COUNT)
+    {
+      tmp = TAILQ_FIRST(&WeatherDataHead_LastMonth);
+      TAILQ_REMOVE(&WeatherDataHead_LastMonth, tmp, ListEntry);
+      free(tmp);
+      month_weather_data_counter--;
+    }
+
+    /* Allocate a new entry for the queue */    
+    new_month = malloc(sizeof(weather_data_entry_t));
+    if (new_month == NULL)
+    {
+      perror("malloc");
+      return -1;
+    }
+
+    /* Backup the average weather data for month history */
+    memcpy(new_month, &month_weather_data, sizeof(weather_data_entry_t));
+
+    /* Insert the new entry to the tail of the queue */
+    TAILQ_INSERT_TAIL(&WeatherDataHead_LastMonth, new_month, ListEntry);
+    month_weather_data_counter++;
+    reset_average_weather_data(&month_weather_data);
+  }
   
+  /* Add the current weather data to the average weather data */
+  update_average_weather_data(&year_weather_data, 
+                              (year_weather_data_counter == 0) ? 0:year_weather_data_skip_counter,
+                              weather_data);
+
+  /* Update the year data only every X received data */
+  year_weather_data_skip_counter ++;
+  if (loglevel > 2)
+  {
+    LOG_printf(LOG_LVL_DEBUG, "Y s%d/%d c%d/%d\n", year_weather_data_skip_counter, YEAR_WEATHER_DATA_SKIP_COUNT,
+             year_weather_data_counter, YEAR_WEATHER_DATA_COUNT);
+  }
+
+  if (year_weather_data_skip_counter == YEAR_WEATHER_DATA_SKIP_COUNT)
+  {
+    /* Remove the oldest weather data of the tail queue when 
+     * the entry counter has reached the history depth point count
+     */
+    if (year_weather_data_counter == YEAR_WEATHER_DATA_COUNT)
+    {
+      tmp = TAILQ_FIRST(&WeatherDataHead_LastYear);
+      TAILQ_REMOVE(&WeatherDataHead_LastYear, tmp, ListEntry);
+      free(tmp);
+      year_weather_data_counter--;
+    }
+
+    /* Allocate a new entry for the queue */    
+    new_year = malloc(sizeof(weather_data_entry_t));
+    if (new_year == NULL)
+    {
+      perror("malloc");
+      return -1;
+    }
+
+    /* Backup the average weather data for year history */
+    memcpy(new_year, &year_weather_data, sizeof(weather_data_entry_t));
+
+    /* Insert the new entry to the tail of the queue */
+    TAILQ_INSERT_TAIL(&WeatherDataHead_LastYear, new_year, ListEntry);
+    year_weather_data_counter++;
+    reset_average_weather_data(&year_weather_data);
+  }
+
 
   fd_in_b = open("/usr/share/vantage_connect/html_template/weather_chart_begin.html", O_RDONLY);
   if (fd_in_b < 0)
@@ -838,6 +944,30 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
     snprintf(html_path, sizeof(html_path), "%s/weather_chart_24h.html", www_root);
     fd_out_day = open(html_path, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
     if (fd_out_day < 0)
+    {
+      perror("Unable to open output file");
+      ret = -1;
+      goto local_web_update_exit;
+    }
+  }
+
+  if (month_weather_data_skip_counter == MONTH_WEATHER_DATA_SKIP_COUNT)
+  {
+    snprintf(html_path, sizeof(html_path), "%s/weather_chart_month.html", www_root);
+    fd_out_month = open(html_path, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+    if (fd_out_month < 0)
+    {
+      perror("Unable to open output file");
+      ret = -1;
+      goto local_web_update_exit;
+    }
+  }
+
+  if (year_weather_data_skip_counter == YEAR_WEATHER_DATA_SKIP_COUNT)
+  {
+    snprintf(html_path, sizeof(html_path), "%s/weather_chart_year.html", www_root);
+    fd_out_year = open(html_path, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+    if (fd_out_year < 0)
     {
       perror("Unable to open output file");
       ret = -1;
@@ -909,6 +1039,28 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
     }
   }
 
+  if (month_weather_data_skip_counter == MONTH_WEATHER_DATA_SKIP_COUNT)
+  {
+    n = write(fd_out_month, file_content, file1_size);
+    if (n < file1_size)
+    {
+      perror("write");
+      ret = -1;
+      goto local_web_update_exit;
+    }
+  }
+
+  if (year_weather_data_skip_counter == YEAR_WEATHER_DATA_SKIP_COUNT)
+  {
+    n = write(fd_out_year, file_content, file1_size);
+    if (n < file1_size)
+    {
+      perror("write");
+      ret = -1;
+      goto local_web_update_exit;
+    }
+  }
+
   /* Fill the data vars for the 10 minutes page*/
   local_web_update_data_section(fd_out_tenm, &WeatherDataHead_LastTenM);
 
@@ -922,6 +1074,18 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
   if (day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT)
   {
     local_web_update_data_section(fd_out_day, &WeatherDataHead_LastDay);
+  }
+
+  /* Fill the data vars for the month page */
+  if (month_weather_data_skip_counter == MONTH_WEATHER_DATA_SKIP_COUNT)
+  {
+    local_web_update_data_section(fd_out_month, &WeatherDataHead_LastMonth);
+  }
+
+  /* Fill the data vars for the year page */
+  if (year_weather_data_skip_counter == YEAR_WEATHER_DATA_SKIP_COUNT)
+  {
+    local_web_update_data_section(fd_out_month, &WeatherDataHead_LastYear);
   }
 
   /* Write HTML page footer */
@@ -963,6 +1127,28 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
     }
   }
 
+  if (month_weather_data_skip_counter == MONTH_WEATHER_DATA_SKIP_COUNT)
+  {
+    n = write(fd_out_month, file_content, file2_size);
+    if (n < file2_size)
+    {
+      perror("write");
+      ret = -1;
+      goto local_web_update_exit;
+    }
+  }
+
+  if (year_weather_data_skip_counter == YEAR_WEATHER_DATA_SKIP_COUNT)
+  {
+    n = write(fd_out_year, file_content, file2_size);
+    if (n < file2_size)
+    {
+      perror("write");
+      ret = -1;
+      goto local_web_update_exit;
+    }
+  }
+
 local_web_update_exit:
   if (fd_in_b > 0)
     close(fd_in_b);
@@ -974,6 +1160,10 @@ local_web_update_exit:
     close(fd_out_hour);
   if (fd_out_day > 0)
     close(fd_out_day);
+  if (fd_out_month > 0)
+    close(fd_out_month);
+  if (fd_out_year > 0)
+    close(fd_out_year);
   if (file_content != NULL)
     free(file_content);
 
@@ -986,6 +1176,16 @@ local_web_update_exit:
   if (day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT)
   {
     day_weather_data_skip_counter = 0;
+  }
+
+  if (month_weather_data_skip_counter == MONTH_WEATHER_DATA_SKIP_COUNT)
+  {
+    month_weather_data_skip_counter = 0;
+  }
+
+  if (year_weather_data_skip_counter == YEAR_WEATHER_DATA_SKIP_COUNT)
+  {
+    year_weather_data_skip_counter = 0;
   }
 
   if (loglevel > 1)
