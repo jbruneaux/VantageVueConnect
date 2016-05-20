@@ -25,7 +25,7 @@ IDIR=.
 
 CC=${TOOLCHAIN_PATH}/${TOOLCHAIN_PREFIX}-gcc
 #CC=gcc
-CFLAGS=-I$(IDIR) -Wall
+CFLAGS=-I$(IDIR) -Wall -DLOG_USES_SYSLOG
 
 ODIR=obj
 LDIR=../lib 
@@ -33,7 +33,8 @@ LIBS=-ldl -lpthread -lm
 
 _OBJ = main.o \
        vantage_serial.o \
-       data_updater.o
+       data_updater.o \
+       log.o
 OBJ = $(patsubst %,$(ODIR)/%,$(_OBJ))
 
 

@@ -23,17 +23,22 @@
 #include <sys/types.h>
 
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <termios.h>
 #include <errno.h>
 #include <float.h>
 #include <math.h>
+#include <sys/poll.h>
 #include <sys/timerfd.h>
 
 #include "vantage_serial.h"
 #include "vantage_serial_prot.h"
 #include "data_defs.h"
+#include "log.h"
+
+#define MAX_DEV_PATH_LEN 64
 
 #define TTY_RECV_BUFFER_SIZE (LOOP_PACKET_SIZE * 2)
 
@@ -56,8 +61,10 @@ typedef enum vantage_console_decoder_state_e
 
 typedef struct vantage_console_context_s
 {
-  int console_tty_fd;
-  int timer_fd;
+  int  use_usb_serial;
+  char console_dev_path[MAX_DEV_PATH_LEN];
+  int  console_tty_fd;
+  int  timer_fd;
 
   vantage_console_decoder_state_t decoder_state;
   int                             message_awaited_length;
@@ -82,10 +89,13 @@ static int console_tty_open(char* dev_path)
   int tmp_file_fd;
   struct termios t;
 
+  LOG_printf(LOG_LVL_WARNING, "Try to open console on device %s\n", dev_path);
+
   tmp_file_fd = open (dev_path, O_RDWR);
   if (tmp_file_fd < 0)
   {
-    perror("Error opening device");
+    LOG_printf(LOG_LVL_WARNING, "Can't open device %s. Errno %d\n", dev_path, errno);
+    return -1;
   }
 
   /* Get current attributes */
@@ -107,11 +117,6 @@ static int console_tty_open(char* dev_path)
   return tmp_file_fd;
 }
 
-static void console_tty_close(int console_tty_fd)
-{
-  close(console_tty_fd);
-}
-
 static int console_wakeup(int console_tty_fd)
 {
   fd_set fdset;
@@ -123,9 +128,9 @@ static int console_wakeup(int console_tty_fd)
   int cr_lf = 0;
   int wake_attemp_counter = 3;
 
-  if ( loglevel > 1 )
+  if (loglevel > 1)
   {
-    fprintf(stderr, "console_wakeup\n");
+    LOG_printf(LOG_LVL_DEBUG, "console_wakeup\n");
   }
 
   while ( (wake_attemp_counter--) && (!console_awake) )
@@ -138,16 +143,16 @@ static int console_wakeup(int console_tty_fd)
     tv.tv_sec = 1;
     tv.tv_usec = 0;
 
-    if ( loglevel > 1 )
+    if (loglevel > 1)
     {
-      fprintf(stderr, "console_wakeup -> select\n");
+      LOG_printf(LOG_LVL_DEBUG, "console_wakeup -> select\n");
     }
 
     retval = select(console_tty_fd+1, &fdset, NULL, NULL, &tv);
 
-    if ( loglevel > 1 )
+    if (loglevel > 1)
     {
-      fprintf(stderr, "console_wakeup select returns %d\n", retval);
+      LOG_printf(LOG_LVL_DEBUG, "console_wakeup select returns %d\n", retval);
     }
 
     if (retval)
@@ -156,11 +161,11 @@ static int console_wakeup(int console_tty_fd)
       pbuf = tmp_buf;
       while(retval--)
       {
-        if ( (*pbuf == '\r') && (cr_lf == 0) )
+        if ((*pbuf == '\r') && (cr_lf == 0))
         {
           cr_lf = 1;
         }
-        else if ( (*pbuf == '\n') && (cr_lf == 1) )
+        else if ((*pbuf == '\n') && (cr_lf == 1))
         {
           console_awake = 1;
         }
@@ -174,12 +179,67 @@ static int console_wakeup(int console_tty_fd)
     }
     else
     {
-      fprintf(stderr, "No answer received\n");
+      LOG_printf(LOG_LVL_ERROR, "No answer received\n");
     }
   }
 
 
   return console_awake;
+}
+
+static int console_tty_probe(char* dev_path, int autodetect)
+{
+  int tmp_file_fd, wakeup_result;
+  char tmp_dev_path[MAX_DEV_PATH_LEN];
+  int devno = 0;
+
+  if (autodetect)
+  {
+    for (devno=0; devno<10; devno++)
+    {
+      snprintf(tmp_dev_path, MAX_DEV_PATH_LEN, "%s%d", dev_path, devno);
+      LOG_printf(LOG_LVL_INFO, "Look-up for console on device %s\n", tmp_dev_path);
+      tmp_file_fd = console_tty_open(tmp_dev_path);
+      if (tmp_file_fd != -1)
+      {
+        wakeup_result = console_wakeup(tmp_file_fd);
+        if (wakeup_result == 1)
+        {
+          LOG_printf(LOG_LVL_INFO, "Found console on device %s\n", tmp_dev_path);
+          break;
+        }
+        else
+        {
+          close(tmp_file_fd);
+          tmp_file_fd = -1;
+        }
+      }
+    }
+  }
+  else
+  {
+    tmp_file_fd = console_tty_open(dev_path);
+    if (tmp_file_fd != -1)
+    {
+      wakeup_result = console_wakeup(tmp_file_fd);
+      if (wakeup_result == 1)
+      {
+        return tmp_file_fd;
+      }
+      else
+      {
+        close(tmp_file_fd);
+        tmp_file_fd = -1;
+      }
+    }
+  }
+
+  return tmp_file_fd;
+}
+
+static void console_tty_close(int console_tty_fd)
+{
+  close(console_tty_fd);
 }
 
 static int console_check_crc(unsigned char* buf, int size)
@@ -197,8 +257,8 @@ static int console_check_crc(unsigned char* buf, int size)
 
 static float compute_wind_chill(float air_temperature_F, float wind_speed_MPH)
 {
-  if ( (air_temperature_F >= -50.0) && (air_temperature_F <= 50.0) && 
-       (wind_speed_MPH >= 3.0) && (wind_speed_MPH <= 110.0) )
+  if ((air_temperature_F >= -50.0) && (air_temperature_F <= 50.0) && 
+       (wind_speed_MPH >= 3.0) && (wind_speed_MPH <= 110.0))
   {
     return (35.74 + (0.6215 * air_temperature_F) - (35.75 * powf(wind_speed_MPH, 0.16)) + (0.4275 * air_temperature_F * powf(wind_speed_MPH, 0.16)));
   }
@@ -235,11 +295,11 @@ static void console_process_loop_message(vantage_console_context_t *vantage_cons
    */
 
   /* LOOP message */
-  if ( packet_buffer->loop_packet.packet_type == 0 )
+  if (packet_buffer->loop_packet.packet_type == 0)
   {
-    if ( loglevel > 0 )
+    if (loglevel > 0)
     {
-      fprintf(stdout, "Received LOOP packet\n");
+      LOG_printf(LOG_LVL_INFO, "Received LOOP packet\n");
     }
 
     /* Outisde temperature is in 10th of Fahrenheit. Convert it to Celcius */
@@ -293,11 +353,11 @@ static void console_process_loop_message(vantage_console_context_t *vantage_cons
     weather_data.wind_direction_gust_10m = FLT_MIN;
   }
   /* LOOP2 message */
-  else if ( packet_buffer->loop_packet.packet_type == 1 )
+  else if (packet_buffer->loop_packet.packet_type == 1)
   {
-    if ( loglevel > 0 )
+    if (loglevel > 0)
     {
-      fprintf(stdout, "Received LOOP2 packet\n");
+      LOG_printf(LOG_LVL_INFO, "Received LOOP2 packet\n");
     }
 
     /* Outisde temperature is in 10th of Fahrenheit. Convert it to Celcius */
@@ -352,11 +412,11 @@ static void console_process_loop_message(vantage_console_context_t *vantage_cons
   }
   else
   {
-    fprintf(stderr, "Unknown packet type %d\n", packet_buffer->loop_packet.packet_type);
+    LOG_printf(LOG_LVL_ERROR, "Unknown packet type %d\n", packet_buffer->loop_packet.packet_type);
     return;
   }
 
-  if ( vantage_console_priv->DataReadyIndicateCb != NULL )
+  if (vantage_console_priv->DataReadyIndicateCb != NULL)
   {
     vantage_console_priv->DataReadyIndicateCb(&weather_data);
   }
@@ -370,7 +430,7 @@ static void console_process_data(vantage_console_context_t *vantage_console_priv
 
   while(size--)
   {
-    if ( loglevel > 2 )
+    if (loglevel > 2)
     {
       printf("console_process_data : State %d, pbuf = 0x%02x, rcvd %d\n", vantage_console_priv->decoder_state, *pbuf, vantage_console_priv->data_recvd_length);
     }
@@ -379,11 +439,11 @@ static void console_process_data(vantage_console_context_t *vantage_console_priv
     {
       case VTG_DECODER_STATE_WAIT_LOOP_PARTIAL_HEADER:
         /* Wait for "OO" characters */
-        if ( *pbuf == 'O' )
+        if (*pbuf == 'O')
         {
           vantage_console_priv->decoder_message_buffer[vantage_console_priv->data_recvd_length] = * pbuf;
           vantage_console_priv->data_recvd_length ++;
-          if ( vantage_console_priv->data_recvd_length == 3 )
+          if (vantage_console_priv->data_recvd_length == 3)
           {
             vantage_console_priv->decoder_state = VTG_DECODER_STATE_WAIT_LOOP_PACKET_DATA_END;
           }
@@ -397,7 +457,7 @@ static void console_process_data(vantage_console_context_t *vantage_console_priv
 
       case VTG_DECODER_STATE_WAIT_ANY:
         /* If we received a 'L', then we are receiveing a Loop message */
-        if ( *pbuf == 'L' )
+        if (*pbuf == 'L')
         {
           vantage_console_priv->decoder_message_buffer[0] = *pbuf;
           vantage_console_priv->decoder_state = VTG_DECODER_STATE_WAIT_LOOP_PARTIAL_HEADER;
@@ -410,16 +470,16 @@ static void console_process_data(vantage_console_context_t *vantage_console_priv
       case VTG_DECODER_STATE_WAIT_LOOP_PACKET_DATA_END:
         vantage_console_priv->decoder_message_buffer[vantage_console_priv->data_recvd_length] = * pbuf;
         vantage_console_priv->data_recvd_length ++;
-        if ( vantage_console_priv->message_awaited_length == vantage_console_priv->data_recvd_length )
+        if (vantage_console_priv->message_awaited_length == vantage_console_priv->data_recvd_length)
         {
-          if ( console_check_crc(vantage_console_priv->decoder_message_buffer,
-                                 vantage_console_priv->data_recvd_length) == 1 )
+          if (console_check_crc(vantage_console_priv->decoder_message_buffer,
+                                vantage_console_priv->data_recvd_length) == 1)
           {
             console_process_loop_message(vantage_console_priv);
           }
           else
           {
-            fprintf(stderr, "CRC Error in LOOP message\n");
+            LOG_printf(LOG_LVL_ERROR, "CRC Error in LOOP message\n");
           }
 
           vantage_console_priv->decoder_state = VTG_DECODER_STATE_WAIT_ANY;
@@ -436,17 +496,6 @@ static void console_process_data(vantage_console_context_t *vantage_console_priv
   }
 }
 
-static int fd_set_add(int fd, fd_set* fds, int* max_fd) 
-{
-  FD_SET(fd, fds);
-  if (fd > *max_fd) 
-  {
-    *max_fd = fd;
-  }
-  return 0;
-}
-
-
 static void* console_reader_thread(void *arg)
 {
   vantage_console_context_t *vantage_console_priv = (vantage_console_context_t *)arg;
@@ -454,90 +503,144 @@ static void* console_reader_thread(void *arg)
   unsigned char in_buf[TTY_RECV_BUFFER_SIZE];
   int n;
   uint64_t exp;
+  int timeout_sec = (VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S + 1);
 
-  fd_set  readSet;
+  struct pollfd fds[2];
   int     console_tty_fd = vantage_console_priv->console_tty_fd;
   int     timer_fd = vantage_console_priv->timer_fd;
-  int     ret;
-  int     max_fd = 0;
+  int     ret, console_need_reopen;
 
-  FD_ZERO(&readSet);
-  fd_set_add(console_tty_fd, &readSet, &max_fd);
-  fd_set_add(timer_fd, &readSet, &max_fd);
- 
-  if ( loglevel > 0 )
+  if (loglevel > 0)
   {
-    fprintf(stdout, "TTY Reader thread started\n");
+    LOG_printf(LOG_LVL_INFO, "TTY Reader thread started\n");
   }
+
+  /* Prepare the poll fd set */
+  fds[0].fd = console_tty_fd;
+  fds[0].events = POLLIN | POLLERR | POLLHUP | POLLNVAL;
+  fds[1].fd = timer_fd;
+  fds[1].events = POLLIN;
 
   while(vantage_console_priv->tty_thread_stop_req == 0)
   {
-    /* Keep a clean copy of the FD set which will be realoaded every time */
-    fd_set readSetCopy = readSet;
+    console_need_reopen = 0;
 
-    if ( loglevel > 2 )
+    if (loglevel > 2)
     {
-      fprintf(stderr, "TTY thread -> select\n");
+      LOG_printf(LOG_LVL_DEBUG, "TTY thread -> select\n");
     }
 
-    ret = select(max_fd+1, &readSetCopy, NULL, NULL, NULL);
+    ret = poll(fds, 2, timeout_sec * 1000);
     if (ret == -1) 
     {
-      perror("Select error");
+      LOG_printf(LOG_LVL_ERROR, "Poll error. Errno %d\n", errno);
       return NULL;
     }
 
-    if ( loglevel > 2 )
+    if (loglevel > 2)
     {
-      fprintf(stderr, "TTY thread select returns %d\n", ret);
+      LOG_printf(LOG_LVL_DEBUG, "TTY thread poll returns %d\n", ret);
     }
 
-    if ( FD_ISSET(console_tty_fd, &readSetCopy) )
+    if (ret == 0)
     {
-      if ( loglevel > 2 )
+      LOG_printf(LOG_LVL_ERROR, "Poll timeout. Try to re-open the tty. Errno %d\n", errno);
+
+      console_need_reopen = 1;
+      goto console_reopen_check;
+    }
+    else
+    {
+      if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL))
       {
-        fprintf(stderr, "Console FD set\n");
+        LOG_printf(LOG_LVL_ERROR, "Error detected on the TTY device. Try to re-open the tty. revents %x\n", fds[0].revents);
+
+        console_need_reopen = 1;
+        goto console_reopen_check;
       }
-      n = read(console_tty_fd, in_buf, TTY_RECV_BUFFER_SIZE);
-      if ( n > 0 ) {
-        if ( loglevel > 2 )
+      else if (fds[0].revents & POLLIN)
+      {
+        if (loglevel > 2)
         {
-          fprintf(stdout, "Readed %d bytes from TTY\n", n);
+          LOG_printf(LOG_LVL_DEBUG, "Console FD set\n");
         }
-        console_process_data(vantage_console_priv, in_buf, n);
-      } 
+        n = read(console_tty_fd, in_buf, TTY_RECV_BUFFER_SIZE);
+        if (n > 0) {
+          if (loglevel > 2)
+          {
+            LOG_printf(LOG_LVL_DEBUG, "Readed %d bytes from TTY\n", n);
+          }
+          console_process_data(vantage_console_priv, in_buf, n);
+        }
+        else
+        {
+          LOG_printf(LOG_LVL_ERROR, "0 bytes read from the TTY device. Try to re-open the tty. revents %x\n");
+
+          console_need_reopen = 1;
+          goto console_reopen_check;
+        }
+
+        timeout_sec = (VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S + 1);
+      }
+
+      if (fds[1].revents & POLLIN)
+      {
+        if (loglevel > 2)
+        {
+          LOG_printf(LOG_LVL_DEBUG, "Timer FD set\n");
+        }
+        read(timer_fd, &exp, sizeof(uint64_t));
+
+        if (loglevel > 0)
+        {
+          LOG_printf(LOG_LVL_INFO, "Send LOOP%s packet request\n", use_loop2 ? "2" : "");
+        }
+
+        /* Wake-up console before LOOP packet request */
+        console_wakeup(console_tty_fd);
+
+        if (use_loop2)
+        {
+          write(console_tty_fd, LOOP2_PACKET_REQ, sizeof(LOOP2_PACKET_REQ));  /* Request LOOP2 packet */
+        }
+        else
+        {
+          write(console_tty_fd, LOOP_PACKET_REQ, sizeof(LOOP_PACKET_REQ));  /* Request LOOP packet */
+        }
+
+        timeout_sec = 2;
+      }
     }
 
-    if ( FD_ISSET(timer_fd, &readSetCopy) )
+console_reopen_check:
+    if (console_need_reopen)
     {
-      if ( loglevel > 2 )
+      do
       {
-        fprintf(stderr, "Timer FD set\n");
-      }
-      read(timer_fd, &exp, sizeof(uint64_t));
+        close(console_tty_fd);
+        vantage_console_priv->console_tty_fd = -1;
 
-      if ( loglevel > 0 )
-      {
-        fprintf(stdout, "Send LOOP%s packet request\n", use_loop2 ? "2" : "");
-      }
+        console_tty_fd = console_tty_probe(vantage_console_priv->console_dev_path, vantage_console_priv->use_usb_serial);
+        if (console_tty_fd < 0)
+        {
+          LOG_printf(LOG_LVL_ERROR, "Could not find console. Try again in 1 second\n");
+          sleep(1);
+        }
+        else
+        {
+          vantage_console_priv->console_tty_fd = console_tty_fd; 
 
-      /* Wake-up console before LOOP packet request */
-      console_wakeup(console_tty_fd);
+          timeout_sec = (VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S + 1);
 
-      if ( use_loop2 )
-      {
-        write(console_tty_fd, LOOP2_PACKET_REQ, sizeof(LOOP2_PACKET_REQ));  /* Request LOOP2 packet */
-      }
-      else
-      {
-        write(console_tty_fd, LOOP_PACKET_REQ, sizeof(LOOP_PACKET_REQ));  /* Request LOOP packet */
-      }
+          console_need_reopen = 0;
+        }
+      } while(console_need_reopen);
     }
   }
 
-  if ( loglevel > 0 )
+  if (loglevel > 0)
   {
-    fprintf(stdout, "TTY Reader thread stopped\n");
+    LOG_printf(LOG_LVL_INFO, "TTY Reader thread stopped\n");
   }
 
   return NULL;
@@ -545,9 +648,9 @@ static void* console_reader_thread(void *arg)
 
 static void console_reader_thread_stop(vantage_console_context_t *vantage_console_priv)
 {
-  if ( loglevel > 0 )
+  if (loglevel > 0)
   {
-    fprintf(stdout, "TTY Reader thread stop request\n");
+    LOG_printf(LOG_LVL_INFO, "TTY Reader thread stop request\n");
   }
 
   vantage_console_priv->tty_thread_stop_req = 1;
@@ -556,12 +659,15 @@ static void console_reader_thread_stop(vantage_console_context_t *vantage_consol
 /*******************************************************************************
  * Public functions
  ******************************************************************************/
-int VTG_console_init(char* dev_path, VTG_DataReadyIndicateCb_t DataReadyIndicateCb)
+int VTG_console_init(char* dev_path, int use_usb_serial, VTG_DataReadyIndicateCb_t DataReadyIndicateCb)
 {
   struct itimerspec timer_new_value;
 
-  int tty_fd = console_tty_open(dev_path);
-  if ( tty_fd < 0 )
+  vantage_console_priv.use_usb_serial = use_usb_serial;
+  strncpy(vantage_console_priv.console_dev_path, dev_path, MAX_DEV_PATH_LEN);
+
+  int tty_fd = console_tty_probe(dev_path, use_usb_serial);
+  if (tty_fd < 0)
   {
     return -1;
   }
@@ -573,9 +679,9 @@ int VTG_console_init(char* dev_path, VTG_DataReadyIndicateCb_t DataReadyIndicate
   console_wakeup(vantage_console_priv.console_tty_fd);
 
   vantage_console_priv.timer_fd = timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK);
-  if ( vantage_console_priv.timer_fd == -1 )
+  if (vantage_console_priv.timer_fd == -1)
   {
-    fprintf(stderr, "Error creating timer fd\n");
+    LOG_printf(LOG_LVL_ERROR, "Error creating timer fd\n");
     return -1;
   }
 
@@ -590,7 +696,7 @@ int VTG_console_init(char* dev_path, VTG_DataReadyIndicateCb_t DataReadyIndicate
 
   if (timerfd_settime(vantage_console_priv.timer_fd, 0, &timer_new_value, NULL) == -1)
   {
-    fprintf(stderr, "%s: timerfd_settime error (%d)\n", 
+    LOG_printf(LOG_LVL_ERROR, "%s: timerfd_settime error (%d)\n", 
                     __FUNCTION__, errno);
     return -1;
   }

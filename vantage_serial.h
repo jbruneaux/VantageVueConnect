@@ -30,7 +30,7 @@ typedef void (VTG_DataReadyIndicateCb_t)(weather_data_t* weather_data);
 /*******************************************************************************
  * Public API
  ******************************************************************************/
-int  VTG_console_init(char* dev_path, VTG_DataReadyIndicateCb_t DataReadyIndicateCb);
+int  VTG_console_init(char* dev_path, int use_usb_serial, VTG_DataReadyIndicateCb_t DataReadyIndicateCb);
 void VTG_console_exit(void);
 
 #endif /* _VANTAGE_SERIAL_H_ */

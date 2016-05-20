@@ -26,24 +26,30 @@
 #include "vantage_serial.h"
 #include "data_defs.h"
 #include "data_updater.h"
+#include "log.h"
 
 
-static char *dev_filename = NULL;
+static char *dev_filename = "/dev/ttyUSB";
+int dev_filename_opt = 0;
 static char *www_root = "/tmp";
 static char *station_id = NULL;
 static char *station_password = NULL;
 
 int loglevel = 0;
 int use_loop2 = 1;
+int use_usb_serial = 0;
 
 static void print_usage(char* prog_name)
 {
     printf("Usage %s:\n", prog_name);
-    printf("\t-d --dev=[DEV_FILENAME]  : Device to open (e.g : /dev/ttyUSB0) \n");  
     printf("\t-n --no-loop2            : Don't use LOOP2 packet request (default : use LOOP2)\n");
     printf("\t-w --www=[WWW_ROOT]      : Folder where the web pages are written (default : /tmp) \n");  
     printf("\t-s --station_id=[ID]     : Wunderground station id (default : none)\n");
     printf("\t-p --password=[PASS]     : Wunderground password (default : none)\n");
+    printf("\t-u --usb-serial          : Use a usb to serial device. In this case, dev can be set as\n"
+                                        "device prefix (i.e : /dev/ttySER). If no prefix is given, the\n"
+                                        "default prefix is /dev/ttyUSB\n");
+    printf("\t-d --dev=[DEV_FILENAME]  : Device to open (e.g : /dev/ttyUSB0) or prefix is -u is used \n");  
     printf("\n");
     printf("\t-l --loglevel=[LEVEL]    : Log level (default : 0)\n");
     printf("\t-h --help                : Display tool usage\n");
@@ -54,6 +60,7 @@ static void print_usage(char* prog_name)
 static int parse_dev_file(char *optarg)
 {
   dev_filename = optarg;
+  dev_filename_opt = 1;
 
   return(0);
 }
@@ -109,13 +116,14 @@ static int parse_cmd_line(int argc, char **argv)
 
       {"loglevel", required_argument, 0, 'l'},
 
-      /* No arguments optins */
+      /* No arguments options */
+      {"usb-serial", no_argument, 0, 'u'},
       {"no-loop2", no_argument, 0, 'n'},
       {"help", no_argument, 0, 'h'},
       {0, 0, 0, 0}
     };
 
-    c = getopt_long_only (argc, argv, "d:w:s:p:nh", long_options, &option_index);
+    c = getopt_long_only (argc, argv, "d:w:s:p:unh", long_options, &option_index);
 
     if (c == -1) 
     {
@@ -163,6 +171,10 @@ static int parse_cmd_line(int argc, char **argv)
         use_loop2 = 0;
       break;
 
+      case 'u':
+        use_usb_serial = 1;
+      break;
+
       case 'h':
       case '?':
       default:
@@ -176,25 +188,25 @@ static int parse_cmd_line(int argc, char **argv)
 
 static void weather_data_ready_indicate_cb(weather_data_t* weather_data)
 {
-  if ( loglevel > 2 )
+  if (loglevel > 2)
   {
-    fprintf(stdout, "Received weather data\n");
+    LOG_printf(LOG_LVL_INFO, "Received weather data\n");
     
-    fprintf(stdout, "\tOutside temperature : %fC / %fF\n", weather_data->outside_temperature_C, weather_data->outside_temperature_F);
-    fprintf(stdout, "\tOutside chill : %fC / %fF\n", weather_data->outside_chill_C, weather_data->outside_chill_F);
-    fprintf(stdout, "\tOutside humidity : %d%%\n", weather_data->outside_humidity);
-    fprintf(stdout, "\tDew point : %fC\n", weather_data->dew_point_C);
-    fprintf(stdout, "\tInside temperature : %fC\n", weather_data->inside_temperature_C);
-    fprintf(stdout, "\tInside humidity : %d%%\n", weather_data->inside_humidity);
-    fprintf(stdout, "\tBarometer : %fhPa / %fI\n", weather_data->barometric_pressure_Hpa, weather_data->barometric_pressure_I);
-    fprintf(stdout, "\tRain rate : %fmm\n", weather_data->rain_rate_MM);
-    fprintf(stdout, "\tRain day : %fmm\n", weather_data->rain_day_MM);
-    fprintf(stdout, "\tWind Speed : %fkm/h / %fmph\n", weather_data->wind_speed_KPH, weather_data->wind_speed_MPH);
-    fprintf(stdout, "\tWind Speed Avg 2m : %fkm/h\n", weather_data->wind_speed_avg_2m_KPH);
-    fprintf(stdout, "\tWind direction : %d degrees\n", weather_data->wind_direction);
+    LOG_printf(LOG_LVL_INFO, "\tOutside temperature : %fC / %fF\n", weather_data->outside_temperature_C, weather_data->outside_temperature_F);
+    LOG_printf(LOG_LVL_INFO, "\tOutside chill : %fC / %fF\n", weather_data->outside_chill_C, weather_data->outside_chill_F);
+    LOG_printf(LOG_LVL_INFO, "\tOutside humidity : %d%%\n", weather_data->outside_humidity);
+    LOG_printf(LOG_LVL_INFO, "\tDew point : %fC\n", weather_data->dew_point_C);
+    LOG_printf(LOG_LVL_INFO, "\tInside temperature : %fC\n", weather_data->inside_temperature_C);
+    LOG_printf(LOG_LVL_INFO, "\tInside humidity : %d%%\n", weather_data->inside_humidity);
+    LOG_printf(LOG_LVL_INFO, "\tBarometer : %fhPa / %fI\n", weather_data->barometric_pressure_Hpa, weather_data->barometric_pressure_I);
+    LOG_printf(LOG_LVL_INFO, "\tRain rate : %fmm\n", weather_data->rain_rate_MM);
+    LOG_printf(LOG_LVL_INFO, "\tRain day : %fmm\n", weather_data->rain_day_MM);
+    LOG_printf(LOG_LVL_INFO, "\tWind Speed : %fkm/h / %fmph\n", weather_data->wind_speed_KPH, weather_data->wind_speed_MPH);
+    LOG_printf(LOG_LVL_INFO, "\tWind Speed Avg 2m : %fkm/h\n", weather_data->wind_speed_avg_2m_KPH);
+    LOG_printf(LOG_LVL_INFO, "\tWind direction : %d degrees\n", weather_data->wind_direction);
   }
 
-  if ( (station_id != NULL) && (station_password != NULL) )
+  if ((station_id != NULL) && (station_password != NULL))
   {
     wunderground_update(weather_data, station_id, station_password);
   }
@@ -206,18 +218,23 @@ int main(int argc, char**argv)
   /* Parse command line options */
   parse_cmd_line(argc, argv);
 
-  if ( dev_filename == NULL )
+  if ((dev_filename_opt == 0) &&
+      (use_usb_serial == 0))
   {
     print_usage(argv[0]);
     fprintf(stderr, "\n\nError : specify device to use\n");
     return -1;
   }
 
+  LOG_Init("VantageVueConnect");
+
   local_web_init();
 
-  VTG_console_init(dev_filename, weather_data_ready_indicate_cb);
+  VTG_console_init(dev_filename, use_usb_serial, weather_data_ready_indicate_cb);
 
   pause();
+
+  LOG_Close();
 
   return 0;
 }
