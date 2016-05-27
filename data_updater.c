@@ -36,11 +36,12 @@
 #include <netdb.h>
 
 #include "data_defs.h"
+#include "log.h"
 
 #define LOCAL_WEB_UPDATE_BUFFER_MALLOC(var, size)     \
   {                                                   \
     var = malloc(size);                               \
-    if ( var == NULL )                                \
+    if (var == NULL)                                  \
     {                                                 \
       perror("malloc");                               \
       ret = -1;                                       \
@@ -98,7 +99,7 @@
                    dates_buffer, data_buffer);                            \
                                                                           \
     n = write(fd, file_buffer, len);                                      \
-    if ( n < len )                                                        \
+    if (n < len)vv                                                        \
     {                                                                     \
       perror("write");                                                    \
       ret = -1;                                                           \
@@ -148,7 +149,7 @@
                    min_data_buffer, max_data_buffer);                     \
                                                                           \
     n = write(fd, file_buffer, len);                                      \
-    if ( n < len )                                                        \
+    if (n < len)                                                          \
     {                                                                     \
       perror("write");                                                    \
       ret = -1;                                                           \
@@ -225,7 +226,7 @@
                    min_data_buffer_2, max_data_buffer_2);                 \
                                                                           \
     n = write(fd, file_buffer, len);                                      \
-    if ( n < len )                                                        \
+    if (n < len)vv                                                        \
     {                                                                     \
       perror("write");                                                    \
       ret = -1;                                                           \
@@ -250,28 +251,43 @@ typedef struct weather_data_entry_s
   TAILQ_ENTRY(weather_data_entry_s) ListEntry;
 } weather_data_entry_t;
 
-#define TENM_WEATHER_DATA_COUNT  ((10*60) / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
+#define TENM_WEATHER_DATA_GRANULARITY_IN_S VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S  /* 1 point per request */
+#define TENM_WEATHER_DATA_COUNT            ((10*60) / TENM_WEATHER_DATA_GRANULARITY_IN_S)
 unsigned int tenm_weather_data_counter = 0;
-TAILQ_HEAD(WeatherDataHead_s, weather_data_entry_s) WeatherDataHead_LastTenM, WeatherDataHead_LastHour, WeatherDataHead_LastDay;
+TAILQ_HEAD(WeatherDataHead_s, weather_data_entry_s) WeatherDataHead_LastTenM, WeatherDataHead_LastHour, WeatherDataHead_LastDay, WeatherDataHead_LastMonth, WeatherDataHead_LastYear;
 
-#define HOUR_WEATHER_DATA_GRANULARITY_IN_S    60
-#define HOUR_WEATHER_DATA_COUNT  ((60*60) / HOUR_WEATHER_DATA_GRANULARITY_IN_S)
+#define HOUR_WEATHER_DATA_GRANULARITY_IN_S 60  /* 1 point per minute */
+#define HOUR_WEATHER_DATA_COUNT            ((60*60) / HOUR_WEATHER_DATA_GRANULARITY_IN_S)
 #define HOUR_WEATHER_DATA_SKIP_COUNT       (HOUR_WEATHER_DATA_GRANULARITY_IN_S / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
 unsigned int hour_weather_data_counter = 0;
 unsigned int hour_weather_data_skip_counter = HOUR_WEATHER_DATA_SKIP_COUNT - 1;
 weather_data_entry_t hour_weather_data;
 
-#define DAY_WEATHER_DATA_GRANULARITY_IN_S    3600
-#define DAY_WEATHER_DATA_COUNT  ((24*60*60) / DAY_WEATHER_DATA_GRANULARITY_IN_S)
-#define DAY_WEATHER_DATA_SKIP_COUNT       (DAY_WEATHER_DATA_GRANULARITY_IN_S / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
+#define DAY_WEATHER_DATA_GRANULARITY_IN_S  (60*HOUR_WEATHER_DATA_GRANULARITY_IN_S) /* 1 point per hour */
+#define DAY_WEATHER_DATA_COUNT             ((24*60*60) / DAY_WEATHER_DATA_GRANULARITY_IN_S)
+#define DAY_WEATHER_DATA_SKIP_COUNT        (DAY_WEATHER_DATA_GRANULARITY_IN_S / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
 unsigned int day_weather_data_counter = 0;
 unsigned int day_weather_data_skip_counter = DAY_WEATHER_DATA_SKIP_COUNT - 1;
 weather_data_entry_t day_weather_data;
 
+#define MONTH_WEATHER_DATA_GRANULARITY_IN_S (24*DAY_WEATHER_DATA_GRANULARITY_IN_S) /* 1 point per day */
+#define MONTH_WEATHER_DATA_COUNT            ((31*24*60*60) / MONTH_WEATHER_DATA_GRANULARITY_IN_S)
+#define MONTH_WEATHER_DATA_SKIP_COUNT       (MONTH_WEATHER_DATA_GRANULARITY_IN_S / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
+unsigned int month_weather_data_counter = 0;
+unsigned int month_weather_data_skip_counter = MONTH_WEATHER_DATA_SKIP_COUNT - 1;
+weather_data_entry_t month_weather_data;
 
-#define DATE_CONTENT_BUFFER_SIZE  (TENM_WEATHER_DATA_COUNT * 25) /* 23 is the maximum characters count used by
+#define YEAR_WEATHER_DATA_GRANULARITY_IN_S (31*MONTH_WEATHER_DATA_GRANULARITY_IN_S) /* 1 point per month */
+#define YEAR_WEATHER_DATA_COUNT            ((365*31*24*60*60) / YEAR_WEATHER_DATA_GRANULARITY_IN_S)
+#define YEAR_WEATHER_DATA_SKIP_COUNT       (YEAR_WEATHER_DATA_GRANULARITY_IN_S / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
+unsigned int year_weather_data_counter = 0;
+unsigned int year_weather_data_skip_counter = YEAR_WEATHER_DATA_SKIP_COUNT - 1;
+weather_data_entry_t year_weather_data;
+
+/* Set the buffer sizes to the maximum count of point per data set */
+#define DATE_CONTENT_BUFFER_SIZE  (YEAR_WEATHER_DATA_COUNT * 25) /* 23 is the maximum characters count used by
                                                                   * a date : '"YYYY-MM-DD HH:MM:SS",' */
-#define DATA_CONTENT_BUFFER_SIZE  (TENM_WEATHER_DATA_COUNT * 10) /* 9 is the maximum characters count used by
+#define DATA_CONTENT_BUFFER_SIZE  (YEAR_WEATHER_DATA_COUNT * 10) /* 9 is the maximum characters count used by
                                                                   * a float value : '"XXXX.X",' */
 
 extern int loglevel;
@@ -279,42 +295,76 @@ extern int loglevel;
 int wunderground_update(weather_data_t *weather_data, char *station_id, char* station_password)
 {
   struct sockaddr_in serveraddr;
+#if 0
   struct hostent *server;
+#else
+  struct addrinfo hints, *res, *p;
+  int status;
+#endif
   char get_request_content[1024];
   char request[1024];
   char* http_str;
   int j;
 
-  if ( loglevel > 1 )
+  if (loglevel > 1)
   {
-    fprintf(stderr, "+%s\n", __FUNCTION__);
+    LOG_printf(LOG_LVL_DEBUG, "+%s\n", __FUNCTION__);
   }
 
   int tcpSocket = socket(AF_INET, SOCK_STREAM, 0);
      
   if (tcpSocket < 0)
   {
-    fprintf(stderr, "Error opening socket");
-    return -1;
-  }
-
-  server = gethostbyname(WUNDERGROUND_HOST_NAME);
-  if (server == NULL)
-  {
-    fprintf(stderr, "gethostbyname() failed\n");
-    close(tcpSocket);
+    LOG_printf(LOG_LVL_ERROR, "Error opening socket");
     return -1;
   }
 
   bzero((char *) &serveraddr, sizeof(serveraddr));
   serveraddr.sin_family = AF_INET;
+  serveraddr.sin_port = htons(80);
+
+#if 0
+  server = gethostbyname(WUNDERGROUND_HOST_NAME);
+  if (server == NULL)
+  {
+    LOG_printf(LOG_LVL_ERROR, "gethostbyname() failed\n");
+    close(tcpSocket);
+    return -1;
+  }
 
   bcopy((char *)server->h_addr, (char *)&serveraddr.sin_addr.s_addr, server->h_length);
-  serveraddr.sin_port = htons(80);
+#else
+  memset(&hints, 0, sizeof hints);
+  hints.ai_family = AF_INET; // AF_INET or AF_INET6 to force version
+  hints.ai_socktype = SOCK_STREAM;
+
+  if ((status = getaddrinfo(WUNDERGROUND_HOST_NAME, NULL, &hints, &res)) != 0)
+  {
+    LOG_printf(LOG_LVL_ERROR, "getaddrinfo: %s\n", gai_strerror(status));
+    return -1;
+  }
+ 
+  for(p = res;p != NULL; p = p->ai_next)
+  {    
+    if (p->ai_family == AF_INET)
+    {
+      struct sockaddr_in *ipv4 = (struct sockaddr_in *) p->ai_addr;
+      memcpy(&(serveraddr.sin_addr), &(ipv4->sin_addr), sizeof(ipv4->sin_addr));
+      break;
+    }
+    else
+    {
+      LOG_printf(LOG_LVL_ERROR, "Unsupported IPv6 address\n");
+      return -1;
+    }       
+  }
+   
+  freeaddrinfo(res); // free the linked list
+#endif
   
   if (connect(tcpSocket, (struct sockaddr *) &serveraddr, sizeof(serveraddr)) < 0)
   {
-    fprintf(stderr, "Error Connecting");
+    LOG_printf(LOG_LVL_ERROR, "Error Connecting");
     close(tcpSocket);
     return -1;
   }
@@ -333,7 +383,7 @@ int wunderground_update(weather_data_t *weather_data, char *station_id, char* st
   j += snprintf(get_request_content + j, sizeof(get_request_content)-j, 
                 "&winddir=%d&windspeedmph=%3.1f&windspdmph_avg2m=%3.1f",
                 weather_data->wind_direction, weather_data->wind_speed_MPH, weather_data->wind_speed_avg_2m_MPH);
-  if ( weather_data->wind_gust_10m != FLT_MIN )
+  if (weather_data->wind_gust_10m != FLT_MIN)
   {
     j += snprintf(get_request_content + j, sizeof(get_request_content)-j, 
                   "&windgustmph=%3.1f&windgustmph_10m=%3.1f",
@@ -351,9 +401,9 @@ int wunderground_update(weather_data_t *weather_data, char *station_id, char* st
                 "&dailyrainin=%3.1f",
                 weather_data->rain_day_I);
 
-  if ( loglevel > 2 )
+  if (loglevel > 2)
   {
-    fprintf(stderr, "%s\n", get_request_content);
+    LOG_printf(LOG_LVL_DEBUG, "%s\n", get_request_content);
   }
 
   snprintf(request, sizeof(request), 
@@ -363,7 +413,7 @@ int wunderground_update(weather_data_t *weather_data, char *station_id, char* st
 
   if (send(tcpSocket, request, strlen(request), 0) < 0)
   {
-    fprintf(stderr, "Error with send()");
+    LOG_printf(LOG_LVL_ERROR, "Error with send()");
     close(tcpSocket);
     return -1;
   }
@@ -372,33 +422,33 @@ int wunderground_update(weather_data_t *weather_data, char *station_id, char* st
    
   recv(tcpSocket, request, sizeof(request), 0);
 
-  if ( loglevel > 2 )
+  if (loglevel > 2)
   {
-    fprintf(stderr, "Received :\n%s", request);
+    LOG_printf(LOG_LVL_DEBUG, "Received :\n%s", request);
   }
 
   http_str = strstr(request, "HTTP/");
-  if ( http_str != NULL )
+  if (http_str != NULL)
   {
     http_str += sizeof("HTTP/") + 3;
-    if ( strstr(http_str, "200 OK") == (char*)http_str )
+    if (strstr(http_str, "200 OK") == (char*)http_str)
     {
-      if ( loglevel > 0 )
+      if (loglevel > 1)
       {
-        fprintf(stderr, "Success\n");
+        LOG_printf(LOG_LVL_INFO, "Success\n");
       }
     }
     else
     {
-      fprintf(stderr, "Error updating wunderground\n");
+      LOG_printf(LOG_LVL_ERROR, "Error updating wunderground\n");
     }
   }
 
   close(tcpSocket);
 
-  if ( loglevel > 1 )
+  if (loglevel > 1)
   {
-    fprintf(stderr, "-%s\n", __FUNCTION__);
+    LOG_printf(LOG_LVL_DEBUG, "-%s\n", __FUNCTION__);
   }
 
   return 0;
@@ -410,6 +460,8 @@ void local_web_init(void)
   TAILQ_INIT(&(WeatherDataHead_LastTenM));
   TAILQ_INIT(&(WeatherDataHead_LastHour));
   TAILQ_INIT(&(WeatherDataHead_LastDay));
+  TAILQ_INIT(&(WeatherDataHead_LastMonth));
+  TAILQ_INIT(&(WeatherDataHead_LastYear));
 }
 
 static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* WeatherDataHead)
@@ -421,9 +473,9 @@ static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* W
   weather_data_entry_t *tmp;
   weather_data_t *weather_data;
 
-  if ( loglevel > 1 )
+  if (loglevel > 1)
   {
-    fprintf(stderr, "+%s\n", __FUNCTION__);
+    LOG_printf(LOG_LVL_DEBUG, "+%s\n", __FUNCTION__);
   }
 
   LOCAL_WEB_UPDATE_BUFFER_MALLOC(dates_content, DATE_CONTENT_BUFFER_SIZE);
@@ -438,7 +490,7 @@ static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* W
    */
   file_data_size = DATE_CONTENT_BUFFER_SIZE + (DATA_CONTENT_BUFFER_SIZE * 3) + 200;
   file_data = malloc(file_data_size);
-  if ( file_data == NULL )
+  if (file_data == NULL)
   {
     perror("malloc");
     ret = -1;
@@ -466,9 +518,9 @@ static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* W
   dates_len -= 1;
   dates_content[dates_len] = '\0';
 
-  if ( loglevel > 1 )
+  if (loglevel > 1)
   {
-    fprintf(stdout, "Updating local web page using %d records\n", records_count);
+    LOG_printf(LOG_LVL_INFO, "Updating local web page using %d records\n", records_count);
   }
 
 
@@ -478,7 +530,7 @@ static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* W
                                dates_content, data_content_1,
                                data_content_2, data_content_3, 
                                file_data, file_data_size, fd_out);
-  if ( ret != 0 )
+  if (ret != 0)
   {
     goto local_web_update_data_section_exit;
   }
@@ -489,7 +541,7 @@ static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* W
                                dates_content, data_content_1,
                                data_content_2, data_content_3, 
                                file_data, file_data_size, fd_out);
-  if ( ret != 0 )
+  if (ret != 0)
   {
     goto local_web_update_data_section_exit;
   }
@@ -500,7 +552,7 @@ static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* W
                                dates_content, data_content_1,
                                data_content_2, data_content_3, 
                                file_data, file_data_size, fd_out);
-  if ( ret != 0 )
+  if (ret != 0)
   {
     goto local_web_update_data_section_exit;
   }
@@ -511,7 +563,7 @@ static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* W
                                dates_content, data_content_1,
                                data_content_2, data_content_3, 
                                file_data, file_data_size, fd_out);
-  if ( ret != 0 )
+  if (ret != 0)
   {
     goto local_web_update_data_section_exit;
   }
@@ -522,7 +574,7 @@ static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* W
                                dates_content, data_content_1,
                                data_content_2, data_content_3, 
                                file_data, file_data_size, fd_out);
-  if ( ret != 0 )
+  if (ret != 0)
   {
     goto local_web_update_data_section_exit;
   }
@@ -533,7 +585,7 @@ static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* W
                                dates_content, data_content_1,
                                data_content_2, data_content_3,
                                file_data, file_data_size, fd_out);
-  if ( ret != 0 )
+  if (ret != 0)
   {
     goto local_web_update_data_section_exit;
   }
@@ -544,7 +596,7 @@ static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* W
                                dates_content, data_content_1,
                                data_content_2, data_content_3,
                                file_data, file_data_size, fd_out);
-  if ( ret != 0 )
+  if (ret != 0)
   {
     goto local_web_update_data_section_exit;
   }
@@ -555,26 +607,26 @@ static int local_web_update_data_section(int fd_out, struct WeatherDataHead_s* W
                                dates_content, data_content_1,
                                data_content_2, data_content_3,
                                file_data, file_data_size, fd_out);
-  if ( ret != 0 )
+  if (ret != 0)
   {
     goto local_web_update_data_section_exit;
   }
 
 local_web_update_data_section_exit:
-  if ( file_data != NULL )
+  if (file_data != NULL)
     free(file_data);
-  if ( dates_content != NULL )
+  if (dates_content != NULL)
     free(dates_content);
-  if ( data_content_1 != NULL )
+  if (data_content_1 != NULL)
     free(data_content_1);
-  if ( data_content_2 != NULL )
+  if (data_content_2 != NULL)
     free(data_content_2);
-  if ( data_content_3 != NULL )
+  if (data_content_3 != NULL)
     free(data_content_3);
 
-  if ( loglevel > 1 )
+  if (loglevel > 1)
   {
-    fprintf(stderr, "-%s\n", __FUNCTION__);
+    LOG_printf(LOG_LVL_DEBUG, "-%s\n", __FUNCTION__);
   }
 
   return ret;
@@ -585,7 +637,7 @@ void update_average_weather_data(weather_data_entry_t *weather_data, int data_co
   /* This is the first time we call this function for the given average data structure, 
    * simply initialize it with the current weather data content
    */  
-  if ( data_counter == 0 )
+  if (data_counter == 0)
   {
     memcpy(&weather_data->weather_data_average, new_weather_data, sizeof(weather_data_t));
     memcpy(&weather_data->weather_data_minimums, new_weather_data, sizeof(weather_data_t));
@@ -636,18 +688,21 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
 {
   char html_path[1024];
   char* file_content = NULL;
-  int ret = 0, fd_in_b = -1, fd_in_e = -1, fd_out_tenm = -1, fd_out_hour = -1, fd_out_day = -1, n, file1_size, file2_size;
+  int ret = 0;
+  int fd_in_b = -1, fd_in_e = -1;
+  int fd_out_tenm = -1, fd_out_hour = -1, fd_out_day = -1, fd_out_month = -1, fd_out_year = -1;
+  int n, file1_size, file2_size;
   struct stat file_stat;
-  weather_data_entry_t *tmp, *new_tenm, *new_hour, *new_day;
+  weather_data_entry_t *tmp, *new_tenm, *new_hour, *new_day, *new_month, *new_year;
 
-  if ( loglevel > 1 )
+  if (loglevel > 1)
   {
-    fprintf(stderr, "+%s\n", __FUNCTION__);
+    LOG_printf(LOG_LVL_DEBUG, "+%s\n", __FUNCTION__);
   }
 
   /* Allocate a new entry for ten minute history the queue */
   new_tenm = malloc(sizeof(weather_data_entry_t));
-  if ( new_tenm == NULL )
+  if (new_tenm == NULL)
   {
     perror("malloc");
     return -1;
@@ -659,12 +714,12 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
   /* If the 10 minute weather data list has reached its maximum, then remove
    * the first (oldest) element
    */
-  if ( loglevel > 2 )
+  if (loglevel > 2)
   {
-    fprintf(stdout, "T s%d/%d c%d/%d\n", 0, 0,
+    LOG_printf(LOG_LVL_DEBUG, "T s%d/%d c%d/%d\n", 0, 0,
              tenm_weather_data_counter, TENM_WEATHER_DATA_COUNT);
   }
-  if ( tenm_weather_data_counter == TENM_WEATHER_DATA_COUNT )
+  if (tenm_weather_data_counter == TENM_WEATHER_DATA_COUNT)
   {
     tmp = TAILQ_FIRST(&WeatherDataHead_LastTenM);
     TAILQ_REMOVE(&WeatherDataHead_LastTenM, tmp, ListEntry);
@@ -681,18 +736,18 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
 
   /* Update the hour data only every X received data */
   hour_weather_data_skip_counter ++;
-  if ( loglevel > 2 )
+  if (loglevel > 2)
   {
-    fprintf(stdout, "H s%d/%d c%d/%d\n", hour_weather_data_skip_counter, HOUR_WEATHER_DATA_SKIP_COUNT,
+    LOG_printf(LOG_LVL_DEBUG, "H s%d/%d c%d/%d\n", hour_weather_data_skip_counter, HOUR_WEATHER_DATA_SKIP_COUNT,
              hour_weather_data_counter, HOUR_WEATHER_DATA_COUNT);
   }
 
-  if ( hour_weather_data_skip_counter == HOUR_WEATHER_DATA_SKIP_COUNT )
+  if (hour_weather_data_skip_counter == HOUR_WEATHER_DATA_SKIP_COUNT)
   {
     /* Remove the oldest weather data of the tail queue when 
      * the entry counter has reached the history depth point count
      */
-    if ( hour_weather_data_counter == HOUR_WEATHER_DATA_COUNT )
+    if (hour_weather_data_counter == HOUR_WEATHER_DATA_COUNT)
     {
       tmp = TAILQ_FIRST(&WeatherDataHead_LastHour);
       TAILQ_REMOVE(&WeatherDataHead_LastHour, tmp, ListEntry);
@@ -702,7 +757,7 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
 
     /* Allocate a new entry for the queue */    
     new_hour = malloc(sizeof(weather_data_entry_t));
-    if ( new_hour == NULL )
+    if (new_hour == NULL)
     {
       perror("malloc");
       return -1;
@@ -724,18 +779,18 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
 
   /* Update the day data only every X received data */
   day_weather_data_skip_counter ++;
-  if ( loglevel > 2 )
+  if (loglevel > 2)
   {
-    fprintf(stdout, "D s%d/%d c%d/%d\n", day_weather_data_skip_counter, DAY_WEATHER_DATA_SKIP_COUNT,
+    LOG_printf(LOG_LVL_DEBUG, "D s%d/%d c%d/%d\n", day_weather_data_skip_counter, DAY_WEATHER_DATA_SKIP_COUNT,
              day_weather_data_counter, DAY_WEATHER_DATA_COUNT);
   }
 
-  if ( day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT )
+  if (day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT)
   {
     /* Remove the oldest weather data of the tail queue when 
      * the entry counter has reached the history depth point count
      */
-    if ( day_weather_data_counter == DAY_WEATHER_DATA_COUNT )
+    if (day_weather_data_counter == DAY_WEATHER_DATA_COUNT)
     {
       tmp = TAILQ_FIRST(&WeatherDataHead_LastDay);
       TAILQ_REMOVE(&WeatherDataHead_LastDay, tmp, ListEntry);
@@ -745,7 +800,7 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
 
     /* Allocate a new entry for the queue */  
     new_day = malloc(sizeof(weather_data_entry_t));
-    if ( new_day == NULL )
+    if (new_day == NULL)
     {
       perror("malloc");
       return -1;
@@ -759,10 +814,96 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
     day_weather_data_counter++;
     reset_average_weather_data(&day_weather_data);
   }
+
+  /* Add the current weather data to the average weather data */
+  update_average_weather_data(&month_weather_data, 
+                              (month_weather_data_counter == 0) ? 0:month_weather_data_skip_counter,
+                              weather_data);
+
+  /* Update the month data only every X received data */
+  month_weather_data_skip_counter ++;
+  if (loglevel > 2)
+  {
+    LOG_printf(LOG_LVL_DEBUG, "M s%d/%d c%d/%d\n", month_weather_data_skip_counter, MONTH_WEATHER_DATA_SKIP_COUNT,
+             month_weather_data_counter, MONTH_WEATHER_DATA_COUNT);
+  }
+
+  if (month_weather_data_skip_counter == MONTH_WEATHER_DATA_SKIP_COUNT)
+  {
+    /* Remove the oldest weather data of the tail queue when 
+     * the entry counter has reached the history depth point count
+     */
+    if (month_weather_data_counter == MONTH_WEATHER_DATA_COUNT)
+    {
+      tmp = TAILQ_FIRST(&WeatherDataHead_LastMonth);
+      TAILQ_REMOVE(&WeatherDataHead_LastMonth, tmp, ListEntry);
+      free(tmp);
+      month_weather_data_counter--;
+    }
+
+    /* Allocate a new entry for the queue */    
+    new_month = malloc(sizeof(weather_data_entry_t));
+    if (new_month == NULL)
+    {
+      perror("malloc");
+      return -1;
+    }
+
+    /* Backup the average weather data for month history */
+    memcpy(new_month, &month_weather_data, sizeof(weather_data_entry_t));
+
+    /* Insert the new entry to the tail of the queue */
+    TAILQ_INSERT_TAIL(&WeatherDataHead_LastMonth, new_month, ListEntry);
+    month_weather_data_counter++;
+    reset_average_weather_data(&month_weather_data);
+  }
   
+  /* Add the current weather data to the average weather data */
+  update_average_weather_data(&year_weather_data, 
+                              (year_weather_data_counter == 0) ? 0:year_weather_data_skip_counter,
+                              weather_data);
+
+  /* Update the year data only every X received data */
+  year_weather_data_skip_counter ++;
+  if (loglevel > 2)
+  {
+    LOG_printf(LOG_LVL_DEBUG, "Y s%d/%d c%d/%d\n", year_weather_data_skip_counter, YEAR_WEATHER_DATA_SKIP_COUNT,
+             year_weather_data_counter, YEAR_WEATHER_DATA_COUNT);
+  }
+
+  if (year_weather_data_skip_counter == YEAR_WEATHER_DATA_SKIP_COUNT)
+  {
+    /* Remove the oldest weather data of the tail queue when 
+     * the entry counter has reached the history depth point count
+     */
+    if (year_weather_data_counter == YEAR_WEATHER_DATA_COUNT)
+    {
+      tmp = TAILQ_FIRST(&WeatherDataHead_LastYear);
+      TAILQ_REMOVE(&WeatherDataHead_LastYear, tmp, ListEntry);
+      free(tmp);
+      year_weather_data_counter--;
+    }
+
+    /* Allocate a new entry for the queue */    
+    new_year = malloc(sizeof(weather_data_entry_t));
+    if (new_year == NULL)
+    {
+      perror("malloc");
+      return -1;
+    }
+
+    /* Backup the average weather data for year history */
+    memcpy(new_year, &year_weather_data, sizeof(weather_data_entry_t));
+
+    /* Insert the new entry to the tail of the queue */
+    TAILQ_INSERT_TAIL(&WeatherDataHead_LastYear, new_year, ListEntry);
+    year_weather_data_counter++;
+    reset_average_weather_data(&year_weather_data);
+  }
+
 
   fd_in_b = open("/usr/share/vantage_connect/html_template/weather_chart_begin.html", O_RDONLY);
-  if ( fd_in_b < 0 )
+  if (fd_in_b < 0)
   {
     perror("Unable to open input file");
     ret = -1;
@@ -770,7 +911,7 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
   }
 
   fd_in_e = open("/usr/share/vantage_connect/html_template/weather_chart_end.html", O_RDONLY);
-  if ( fd_in_e < 0 )
+  if (fd_in_e < 0)
   {
     perror("Unable to open input file");
     ret = -1;
@@ -779,18 +920,18 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
 
   snprintf(html_path, sizeof(html_path), "%s/weather_chart_10m.html", www_root);
   fd_out_tenm = open(html_path, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
-  if ( fd_out_tenm < 0 )
+  if (fd_out_tenm < 0)
   {
     perror("Unable to open output file");
     ret = -1;
     goto local_web_update_exit;
   }
 
-  if ( hour_weather_data_skip_counter == HOUR_WEATHER_DATA_SKIP_COUNT )
+  if (hour_weather_data_skip_counter == HOUR_WEATHER_DATA_SKIP_COUNT)
   {
     snprintf(html_path, sizeof(html_path), "%s/weather_chart_1h.html", www_root);
     fd_out_hour = open(html_path, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
-    if ( fd_out_hour < 0 )
+    if (fd_out_hour < 0)
     {
       perror("Unable to open output file");
       ret = -1;
@@ -798,11 +939,35 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
     }
   }
 
-  if ( day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT )
+  if (day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT)
   {
     snprintf(html_path, sizeof(html_path), "%s/weather_chart_24h.html", www_root);
     fd_out_day = open(html_path, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
-    if ( fd_out_day < 0 )
+    if (fd_out_day < 0)
+    {
+      perror("Unable to open output file");
+      ret = -1;
+      goto local_web_update_exit;
+    }
+  }
+
+  if (month_weather_data_skip_counter == MONTH_WEATHER_DATA_SKIP_COUNT)
+  {
+    snprintf(html_path, sizeof(html_path), "%s/weather_chart_month.html", www_root);
+    fd_out_month = open(html_path, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+    if (fd_out_month < 0)
+    {
+      perror("Unable to open output file");
+      ret = -1;
+      goto local_web_update_exit;
+    }
+  }
+
+  if (year_weather_data_skip_counter == YEAR_WEATHER_DATA_SKIP_COUNT)
+  {
+    snprintf(html_path, sizeof(html_path), "%s/weather_chart_year.html", www_root);
+    fd_out_year = open(html_path, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+    if (fd_out_year < 0)
     {
       perror("Unable to open output file");
       ret = -1;
@@ -811,7 +976,7 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
   }
 
   /* Write HTML page header */
-  if ( fstat(fd_in_b, &file_stat) == -1 )
+  if (fstat(fd_in_b, &file_stat) == -1)
   {
     perror("stat");
     ret = -1;
@@ -820,7 +985,7 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
 
   file1_size = file_stat.st_size;
 
-  if ( fstat(fd_in_e, &file_stat) == -1 )
+  if (fstat(fd_in_e, &file_stat) == -1)
   {
     perror("stat");
     ret = -1;
@@ -829,7 +994,7 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
   file2_size = file_stat.st_size;
 
   file_content = malloc((file1_size > file2_size) ? file1_size : file2_size);
-  if ( file_content == NULL )
+  if (file_content == NULL)
   {
     perror("malloc");
     ret = -1;
@@ -837,7 +1002,7 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
   }
 
   n = read(fd_in_b, file_content, file1_size);
-  if ( n < file1_size )
+  if (n < file1_size)
   {
     perror("read");
     ret = -1;
@@ -845,17 +1010,17 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
   }
 
   n = write(fd_out_tenm, file_content, file1_size);
-  if ( n < file1_size )
+  if (n < file1_size)
   {
     perror("write");
     ret = -1;
     goto local_web_update_exit;
   }
 
-  if ( hour_weather_data_skip_counter == HOUR_WEATHER_DATA_SKIP_COUNT )
+  if (hour_weather_data_skip_counter == HOUR_WEATHER_DATA_SKIP_COUNT)
   {
     n = write(fd_out_hour, file_content, file1_size);
-    if ( n < file1_size )
+    if (n < file1_size)
     {
       perror("write");
       ret = -1;
@@ -863,10 +1028,32 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
     }
   }
 
-  if ( day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT )
+  if (day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT)
   {
     n = write(fd_out_day, file_content, file1_size);
-    if ( n < file1_size )
+    if (n < file1_size)
+    {
+      perror("write");
+      ret = -1;
+      goto local_web_update_exit;
+    }
+  }
+
+  if (month_weather_data_skip_counter == MONTH_WEATHER_DATA_SKIP_COUNT)
+  {
+    n = write(fd_out_month, file_content, file1_size);
+    if (n < file1_size)
+    {
+      perror("write");
+      ret = -1;
+      goto local_web_update_exit;
+    }
+  }
+
+  if (year_weather_data_skip_counter == YEAR_WEATHER_DATA_SKIP_COUNT)
+  {
+    n = write(fd_out_year, file_content, file1_size);
+    if (n < file1_size)
     {
       perror("write");
       ret = -1;
@@ -878,20 +1065,32 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
   local_web_update_data_section(fd_out_tenm, &WeatherDataHead_LastTenM);
 
   /* Fill the data vars for the 1 hour page */
-  if ( hour_weather_data_skip_counter == HOUR_WEATHER_DATA_SKIP_COUNT )
+  if (hour_weather_data_skip_counter == HOUR_WEATHER_DATA_SKIP_COUNT)
   {
     local_web_update_data_section(fd_out_hour, &WeatherDataHead_LastHour);
   }
 
   /* Fill the data vars for the 24 hour page */
-  if ( day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT )
+  if (day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT)
   {
     local_web_update_data_section(fd_out_day, &WeatherDataHead_LastDay);
   }
 
+  /* Fill the data vars for the month page */
+  if (month_weather_data_skip_counter == MONTH_WEATHER_DATA_SKIP_COUNT)
+  {
+    local_web_update_data_section(fd_out_month, &WeatherDataHead_LastMonth);
+  }
+
+  /* Fill the data vars for the year page */
+  if (year_weather_data_skip_counter == YEAR_WEATHER_DATA_SKIP_COUNT)
+  {
+    local_web_update_data_section(fd_out_month, &WeatherDataHead_LastYear);
+  }
+
   /* Write HTML page footer */
   n = read(fd_in_e, file_content, file2_size);
-  if ( n < file2_size )
+  if (n < file2_size)
   {
     perror("read");
     ret = -1;
@@ -899,17 +1098,17 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
   }
 
   n = write(fd_out_tenm, file_content, file2_size);
-  if ( n < file2_size )
+  if (n < file2_size)
   {
     perror("write");
     ret = -1;
     goto local_web_update_exit;
   }
 
-  if ( hour_weather_data_skip_counter == HOUR_WEATHER_DATA_SKIP_COUNT )
+  if (hour_weather_data_skip_counter == HOUR_WEATHER_DATA_SKIP_COUNT)
   {
     n = write(fd_out_hour, file_content, file2_size);
-    if ( n < file2_size )
+    if (n < file2_size)
     {
       perror("write");
       ret = -1;
@@ -917,10 +1116,32 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
     }
   }
 
-  if ( day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT )
+  if (day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT)
   {
     n = write(fd_out_day, file_content, file2_size);
-    if ( n < file2_size )
+    if (n < file2_size)
+    {
+      perror("write");
+      ret = -1;
+      goto local_web_update_exit;
+    }
+  }
+
+  if (month_weather_data_skip_counter == MONTH_WEATHER_DATA_SKIP_COUNT)
+  {
+    n = write(fd_out_month, file_content, file2_size);
+    if (n < file2_size)
+    {
+      perror("write");
+      ret = -1;
+      goto local_web_update_exit;
+    }
+  }
+
+  if (year_weather_data_skip_counter == YEAR_WEATHER_DATA_SKIP_COUNT)
+  {
+    n = write(fd_out_year, file_content, file2_size);
+    if (n < file2_size)
     {
       perror("write");
       ret = -1;
@@ -929,33 +1150,47 @@ int local_web_update(weather_data_t *weather_data, char* www_root)
   }
 
 local_web_update_exit:
-  if ( fd_in_b > 0 )
+  if (fd_in_b > 0)
     close(fd_in_b);
-  if ( fd_in_e > 0 )
+  if (fd_in_e > 0)
     close(fd_in_e);
-  if ( fd_out_tenm > 0 )
+  if (fd_out_tenm > 0)
     close(fd_out_tenm);
-  if ( fd_out_hour > 0 )
+  if (fd_out_hour > 0)
     close(fd_out_hour);
-  if ( fd_out_day > 0 )
+  if (fd_out_day > 0)
     close(fd_out_day);
-  if ( file_content != NULL )
+  if (fd_out_month > 0)
+    close(fd_out_month);
+  if (fd_out_year > 0)
+    close(fd_out_year);
+  if (file_content != NULL)
     free(file_content);
 
 
-  if ( hour_weather_data_skip_counter == HOUR_WEATHER_DATA_SKIP_COUNT )
+  if (hour_weather_data_skip_counter == HOUR_WEATHER_DATA_SKIP_COUNT)
   {
     hour_weather_data_skip_counter = 0;
   }
 
-  if ( day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT )
+  if (day_weather_data_skip_counter == DAY_WEATHER_DATA_SKIP_COUNT)
   {
     day_weather_data_skip_counter = 0;
   }
 
-  if ( loglevel > 1 )
+  if (month_weather_data_skip_counter == MONTH_WEATHER_DATA_SKIP_COUNT)
   {
-    fprintf(stderr, "-%s\n", __FUNCTION__);
+    month_weather_data_skip_counter = 0;
+  }
+
+  if (year_weather_data_skip_counter == YEAR_WEATHER_DATA_SKIP_COUNT)
+  {
+    year_weather_data_skip_counter = 0;
+  }
+
+  if (loglevel > 1)
+  {
+    LOG_printf(LOG_LVL_DEBUG, "-%s\n", __FUNCTION__);
   }
 
   return ret;

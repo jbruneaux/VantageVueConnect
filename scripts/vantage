@@ -9,7 +9,7 @@ start() {
         echo "Starting Vantage Connect"
         STATIONID=XXX
         PASSWORD=YYY
-        /usr/bin/vantage_connect -d /dev/ttyUSB0 -s ${STATIONID} -p ${PASSWORD} 2>&1 | logger &
+        /usr/bin/vantage_connect -u -d /dev/ttyUSB -s ${STATIONID} -p ${PASSWORD} &
 }                 
  
 stop() {          
