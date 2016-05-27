@@ -278,16 +278,16 @@ unsigned int month_weather_data_skip_counter = MONTH_WEATHER_DATA_SKIP_COUNT - 1
 weather_data_entry_t month_weather_data;
 
 #define YEAR_WEATHER_DATA_GRANULARITY_IN_S (31*MONTH_WEATHER_DATA_GRANULARITY_IN_S) /* 1 point per month */
-#define YEAR_WEATHER_DATA_COUNT            ((365*31*24*60*60) / YEAR_WEATHER_DATA_GRANULARITY_IN_S)
+#define YEAR_WEATHER_DATA_COUNT            ((12*31*24*60*60) / YEAR_WEATHER_DATA_GRANULARITY_IN_S)
 #define YEAR_WEATHER_DATA_SKIP_COUNT       (YEAR_WEATHER_DATA_GRANULARITY_IN_S / VANTAGE_PERIODIC_WEATHER_DATA_QUERY_IN_S)
 unsigned int year_weather_data_counter = 0;
 unsigned int year_weather_data_skip_counter = YEAR_WEATHER_DATA_SKIP_COUNT - 1;
 weather_data_entry_t year_weather_data;
 
 /* Set the buffer sizes to the maximum count of point per data set */
-#define DATE_CONTENT_BUFFER_SIZE  (YEAR_WEATHER_DATA_COUNT * 25) /* 23 is the maximum characters count used by
+#define DATE_CONTENT_BUFFER_SIZE  (TENM_WEATHER_DATA_COUNT * 25) /* 23 is the maximum characters count used by
                                                                   * a date : '"YYYY-MM-DD HH:MM:SS",' */
-#define DATA_CONTENT_BUFFER_SIZE  (YEAR_WEATHER_DATA_COUNT * 10) /* 9 is the maximum characters count used by
+#define DATA_CONTENT_BUFFER_SIZE  (TENM_WEATHER_DATA_COUNT * 10) /* 9 is the maximum characters count used by
                                                                   * a float value : '"XXXX.X",' */
 
 extern int loglevel;
