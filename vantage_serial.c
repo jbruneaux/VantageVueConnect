@@ -91,7 +91,7 @@ static int console_tty_open(char* dev_path)
 
   LOG_printf(LOG_LVL_WARNING, "Try to open console on device %s\n", dev_path);
 
-  tmp_file_fd = open (dev_path, O_RDWR);
+  tmp_file_fd = open (dev_path, O_RDWR | O_NONBLOCK);
   if (tmp_file_fd < 0)
   {
     LOG_printf(LOG_LVL_WARNING, "Can't open device %s. Errno %d\n", dev_path, errno);
